@@ -1,5 +1,5 @@
-import { DiceBinOp, DiceExpression, DiceReducer, DiceUnOp, LowHigh, binaryOp, diceExpressions, diceListWithFilter, diceListWithMap, diceReduce, die, drop, explode, keep, literal, reroll, unaryOp, upTo, valueOrMore } from '../src/dice-expression'
-import { RollResult, binaryOpResult, diceExpressionsResult, diceFilterableResult, diceMapeableResult, diceReduceResult, dieResult, discardResult, exploded, literalResult, normal, oneResult, rerolled, unaryOpResult } from '../src/roll-result'
+import { DiceBinOp, DiceExpression, DiceReducer, DiceUnOp, LowHigh, binaryOp, diceExpressions, diceListWithFilter, diceListWithMap, diceReduce, die, drop, explode, keep, literal, reroll, unaryOp, upTo, valueOrMore, filterableDiceExpressions } from '../src/dice-expression'
+import { RollResult, binaryOpResult, diceExpressionsResult, diceFilterableResult, diceMapeableResult, diceReduceResult, dieResult, discardResult, exploded, keepResult, literalResult, normal, oneResult, rerolled, unaryOpResult } from '../src/roll-result'
 import { Roller } from '../src/roller'
 
 function maxRoller() {
@@ -39,10 +39,10 @@ const tests: {
     test: diceReduce(diceExpressions(literal(1), literal(2), literal(3)), DiceReducer.Max),
     min: diceReduceResult(diceExpressionsResult([literalResult(1,1), literalResult(2,2), literalResult(3,3)]), DiceReducer.Max, 3),
     max: diceReduceResult(diceExpressionsResult([literalResult(1,1), literalResult(2,2), literalResult(3,3)]), DiceReducer.Max, 3),
-  // }, {
-  //   test: diceReduce(diceListWithFilter(diceExpressions(literal(1), literal(2), literal(3)), drop(Low, 1)), DiceReducer.Sum),
-  //   min: diceReduceResult(diceFilterableResult([discardResult(literalResult(1, 1)), keep(literalResult(2, 2)), keep(literalResult(3, 3))], drop(LowHigh.Low, 1)), DiceReducer.Sum, 5),
-  //   max: diceReduceResult(diceFilterableResult([discardResult(literalResult(1, 1)), keep(literalResult(2, 2)), keep(literalResult(3, 3))], drop(LowHigh.Low, 1)), DiceReducer.Sum, 5),
+  }, {
+    test: diceReduce(diceListWithFilter(filterableDiceExpressions(literal(1), literal(2), literal(3)), drop(LowHigh.Low, 1)), DiceReducer.Sum),
+    min: diceReduceResult(diceFilterableResult([discardResult(literalResult(1, 1)), keepResult(literalResult(2, 2)), keepResult(literalResult(3, 3))], drop(LowHigh.Low, 1)), DiceReducer.Sum, 5),
+    max: diceReduceResult(diceFilterableResult([discardResult(literalResult(1, 1)), keepResult(literalResult(2, 2)), keepResult(literalResult(3, 3))], drop(LowHigh.Low, 1)), DiceReducer.Sum, 5),
   }, {
     test: diceReduce(diceListWithMap([2,3,4], explode(upTo(1), valueOrMore(3))), DiceReducer.Sum),
     min: diceReduceResult(diceMapeableResult([

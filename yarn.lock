@@ -647,11 +647,6 @@
   dependencies:
     "@sinonjs/commons" "^2.0.0"
 
-"@tempots/std@^0.9.7":
-  version "0.9.7"
-  resolved "https://registry.yarnpkg.com/@tempots/std/-/std-0.9.7.tgz#6d82b36302c8cb4323bf70039b4766345fe0a83c"
-  integrity sha512-T3J1WMwMv/EfrFEv3OENkjcVpzhQMbpg5teoptY+CP9We4fCWbzrv1wIYi3YOO0lkFKpuqIDaMIHl7lyYYPsZQ==
-
 "@types/babel__core@^7.1.14":
   version "7.20.0"
   resolved "https://registry.yarnpkg.com/@types/babel__core/-/babel__core-7.20.0.tgz#61bc5a4cae505ce98e1e36c5445e4bee060d8891"
@@ -2859,6 +2854,11 @@ parse-json@^5.2.0:
     error-ex "^1.3.1"
     json-parse-even-better-errors "^2.3.0"
     lines-and-columns "^1.1.6"
+
+partsing@^0.7.3:
+  version "0.7.3"
+  resolved "https://registry.yarnpkg.com/partsing/-/partsing-0.7.3.tgz#ae8799bccef9a780df1badb0df03827d938bfd8d"
+  integrity sha512-aVpp+SyCXK+UDU3yqgPRqVCvyfn094qXD+UDx/M+ZTHaGmV2aVUX0pVmZ+11E2RpP9uvyX1BAjYLmjinxcUAaA==
 
 path-exists@^4.0.0:
   version "4.0.0"

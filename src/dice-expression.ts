@@ -161,7 +161,7 @@ export interface FilterableDiceExpressions {
 }
 
 export function filterableDiceExpressions (
-  exprs: DiceExpression[]
+  ...exprs: DiceExpression[]
 ): FilterableDiceExpressions {
   return {
     type: 'filterable-dice-expressions',

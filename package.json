@@ -13,7 +13,7 @@
     "npm:publish": "yarn npm:prep && (cd dist && yarn publish --access public)"
   },
   "dependencies": {
-    "@tempots/std": "^0.9.7"
+    "partsing": "^0.7.3"
   },
   "devDependencies": {
     "@happy-dom/jest-environment": "^9.1.7",

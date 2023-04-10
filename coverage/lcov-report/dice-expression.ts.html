@@ -23,9 +23,9 @@
         <div class='clearfix'>
             
             <div class='fl pad1y space-right2'>
-                <span class="strong">77.14% </span>
+                <span class="strong">81.42% </span>
                 <span class="quiet">Statements</span>
-                <span class='fraction'>54/70</span>
+                <span class='fraction'>57/70</span>
             </div>
         
             
@@ -37,16 +37,16 @@
         
             
             <div class='fl pad1y space-right2'>
-                <span class="strong">48.38% </span>
+                <span class="strong">58.06% </span>
                 <span class="quiet">Functions</span>
-                <span class='fraction'>15/31</span>
+                <span class='fraction'>18/31</span>
             </div>
         
             
             <div class='fl pad1y space-right2'>
-                <span class="strong">77.14% </span>
+                <span class="strong">81.42% </span>
                 <span class="quiet">Lines</span>
-                <span class='fraction'>54/70</span>
+                <span class='fraction'>57/70</span>
             </div>
         
             
@@ -61,7 +61,7 @@
             </div>
         </template>
     </div>
-    <div class='status-line medium'></div>
+    <div class='status-line high'></div>
     <pre><table class="coverage">
 <tr><td class="line-count quiet"><a name='L1'></a><a href='#L1'>1</a>
 <a name='L2'></a><a href='#L2'>2</a>
@@ -528,7 +528,7 @@
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-yes">1x</span>
-<span class="cline-any cline-yes">15x</span>
+<span class="cline-any cline-yes">18x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
@@ -544,7 +544,7 @@
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-yes">6x</span>
+<span class="cline-any cline-yes">7x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
@@ -622,7 +622,7 @@
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-yes">1x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
@@ -671,7 +671,7 @@
 <span class="cline-any cline-yes">1x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-yes">1x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
@@ -688,7 +688,7 @@
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-yes">1x</span>
-<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-yes">3x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
@@ -1061,11 +1061,11 @@ export interface DiceListWithFilter {
   filter: DiceFilter
 }
 &nbsp;
-export function <span class="fstat-no" title="function not covered" >diceListWithFilter </span>(
+export function diceListWithFilter (
   list: DiceFilterable,
   filter: DiceFilter
 ): DiceListWithFilter {
-<span class="cstat-no" title="statement not covered" >  return {</span>
+  return {
     type: 'dice-list-with-filter',
     list,
     filter
@@ -1111,10 +1111,10 @@ export interface FilterableDiceExpressions {
   exprs: DiceExpression[]
 }
 &nbsp;
-export function <span class="fstat-no" title="function not covered" >filterableDiceExpressions </span>(
-  exprs: DiceExpression[]
+export function filterableDiceExpressions (
+  ...exprs: DiceExpression[]
 ): FilterableDiceExpressions {
-<span class="cstat-no" title="statement not covered" >  return {</span>
+  return {
     type: 'filterable-dice-expressions',
     exprs
   }
@@ -1130,8 +1130,8 @@ export interface Drop {
   value: number
 }
 &nbsp;
-export function <span class="fstat-no" title="function not covered" >drop </span>(dir: LowHigh, value: number): Drop {
-<span class="cstat-no" title="statement not covered" >  return {</span>
+export function drop (dir: LowHigh, value: number): Drop {
+  return {
     type: 'drop',
     dir,
     value
@@ -1399,7 +1399,7 @@ export type ValidationMessage =
             <div class='footer quiet pad2 space-top1 center small'>
                 Code coverage generated by
                 <a href="https://istanbul.js.org/" target="_blank" rel="noopener noreferrer">istanbul</a>
-                at 2023-04-10T01:26:51.679Z
+                at 2023-04-10T03:29:55.208Z
             </div>
         <script src="prettify.js"></script>
         <script>
