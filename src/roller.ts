@@ -3,7 +3,7 @@ import { keepResult, discardResult, rerolled, normal, exploded, diceMapeableResu
 import { oneResult, type DiceResultMapped, type DieResult, type DieResultFilter, type RollResult } from './roll-result'
 import { RR } from './roll-result-domain'
 
-function mapNotNull<T, V>(arr: T[], fn: (t: T) => V | null): V[] {
+function mapNotNull<T, V> (arr: T[], fn: (t: T) => V | null): V[] {
   const result: V[] = []
   for (const t of arr) {
     const v = fn(t)
@@ -14,11 +14,11 @@ function mapNotNull<T, V>(arr: T[], fn: (t: T) => V | null): V[] {
   return result
 }
 
-function compareNumbers(a: number, b: number): number {
+function compareNumbers (a: number, b: number): number {
   return a - b
 }
 
-function median(arr: number[]): number {
+function median (arr: number[]): number {
   const sorted = arr.slice().sort(compareNumbers)
   const mid = Math.floor(sorted.length / 2)
   if (sorted.length % 2 === 0) {
@@ -28,7 +28,7 @@ function median(arr: number[]): number {
   }
 }
 
-function rank<T>(array: T[], compare: (a: T, b: T) => number, incrementDuplicates = true): number[] {
+function rank<T> (array: T[], compare: (a: T, b: T) => number, incrementDuplicates = true): number[] {
   const arr = array.map((v, i): [T, number] => [v, i])
   arr.sort((a, b) => compare(a[0], b[0]))
   const ranks = new Array<number>(arr.length)
@@ -47,7 +47,7 @@ function rank<T>(array: T[], compare: (a: T, b: T) => number, incrementDuplicate
 }
 
 export class Roller {
-  static matchRange(r: number, range: Range): boolean {
+  static matchRange (r: number, range: Range): boolean {
     switch (range.type) {
       case 'exact':
         return compareNumbers(r, range.value) === 0
@@ -62,7 +62,7 @@ export class Roller {
     }
   }
 
-  static filterf(filter: DiceFilter): (res: number, length: number) => boolean {
+  static filterf (filter: DiceFilter): (res: number, length: number) => boolean {
     switch (filter.type) {
       case 'drop':
         if (filter.dir === LowHigh.Low) {
@@ -79,9 +79,9 @@ export class Roller {
     }
   }
 
-  constructor(private readonly dieRoll: Roll) { }
+  constructor (private readonly dieRoll: Roll) { }
 
-  private rollDiceReduce(dr: DiceReduce): RollResult {
+  private rollDiceReduce (dr: DiceReduce): RollResult {
     if (dr.reduceable.type === 'dice-expressions') {
       const rolls = dr.reduceable.exprs.map(expr => this.roll(expr))
       const result = this.reduceRolls(rolls, dr.reducer)
@@ -120,7 +120,7 @@ export class Roller {
     }
   }
 
-  roll(expr: DiceExpression): RollResult {
+  roll (expr: DiceExpression): RollResult {
     if (expr.type === 'die') {
       return oneResult(dieResult(this.dieRoll(expr.sides), expr.sides))
     } else if (expr.type === 'literal') {
@@ -153,7 +153,7 @@ export class Roller {
     }
   }
 
-  mapRolls(rolls: DieResult[], functor: DiceFunctor): DiceResultMapped[] {
+  mapRolls (rolls: DieResult[], functor: DiceFunctor): DiceResultMapped[] {
     const times = functor.times
     switch (functor.type) {
       case 'explode':
@@ -171,17 +171,17 @@ export class Roller {
     }
   }
 
-  explodeRoll(roll: DieResult, times: number, range: Range): DiceResultMapped {
+  explodeRoll (roll: DieResult, times: number, range: Range): DiceResultMapped {
     const acc = this.rollRange(roll, times, range)
     return acc.length === 1 ? normal(acc[0]) : exploded(acc)
   }
 
-  rerollRoll(roll: DieResult, times: number, range: Range): DiceResultMapped {
+  rerollRoll (roll: DieResult, times: number, range: Range): DiceResultMapped {
     const acc = this.rollRange(roll, times, range)
     return acc.length === 1 ? normal(acc[0]) : rerolled(acc)
   }
 
-  rollRange(roll: DieResult, times: number, range: Range): DieResult[] {
+  rollRange (roll: DieResult, times: number, range: Range): DieResult[] {
     const acc = [roll]
     let curr = roll
     while (times !== 0 && Roller.matchRange(curr.result, range)) {
@@ -192,7 +192,7 @@ export class Roller {
     return acc
   }
 
-  keepMappedRolls(rolls: DiceResultMapped[]): DieResult[] {
+  keepMappedRolls (rolls: DiceResultMapped[]): DieResult[] {
     return rolls.flatMap(roll => {
       switch (roll.type) {
         case 'normal': return [roll.roll]
@@ -203,7 +203,7 @@ export class Roller {
     })
   }
 
-  filterRolls(rolls: RollResult[], filter: DiceFilter): DieResultFilter[] {
+  filterRolls (rolls: RollResult[], filter: DiceFilter): DieResultFilter[] {
     const ranked = rank(rolls, (a, b) => {
       return compareNumbers(RR.getResult(a), RR.getResult(b))
     })
@@ -217,7 +217,7 @@ export class Roller {
     })
   }
 
-  keepFilteredRolls(rolls: DieResultFilter[]): RollResult[] {
+  keepFilteredRolls (rolls: DieResultFilter[]): RollResult[] {
     return mapNotNull(rolls, (roll) => {
       if (roll.type === 'keep-result') {
         return roll.roll
@@ -227,11 +227,11 @@ export class Roller {
     })
   }
 
-  reduceRolls(rolls: RollResult[], reducer: DiceReducer): number {
+  reduceRolls (rolls: RollResult[], reducer: DiceReducer): number {
     return this.reduceResults(this.getRollResults(rolls), reducer)
   }
 
-  reduceResults(results: number[], reducer: DiceReducer): number {
+  reduceResults (results: number[], reducer: DiceReducer): number {
     switch (reducer) {
       case DiceReducer.Average: return Math.round(results.reduce((a, b) => a + b, 0) / results.length)
       case DiceReducer.Median: return median(results)
@@ -241,7 +241,7 @@ export class Roller {
     }
   }
 
-  getRollResults(rolls: RollResult[]): number[] {
+  getRollResults (rolls: RollResult[]): number[] {
     return rolls.map(RR.getResult)
   }
 }

@@ -1,4 +1,4 @@
-import { type TextInput, decodeText, eoi } from 'partsing/text'
+import { type TextInput } from 'partsing/text'
 import { DE } from './dice-expression-domain'
 import {
   LowHigh,
@@ -20,7 +20,7 @@ import {
   die as makeDie,
   diceReduce as makeDiceReduce,
   literal,
-  DiceReduceable,
+  type DiceReduceable,
   DiceReducer,
   diceExpressions as makeDiceExpressions,
   filterableDiceArray,
@@ -30,14 +30,14 @@ import {
   filterableDiceExpressions,
   diceListWithMap,
   explode,
-  reroll
+  reroll,
+  type DiceReduce
 } from './dice-expression'
 import { type DecodeError } from 'partsing/error'
 import { type Decoder } from 'partsing/core/decoder'
 import { type DecodeResult } from 'partsing/core/result'
-import { matchChar, regexp, match } from 'partsing/text'
+import { matchChar, regexp, match, matchAnyCharOf } from 'partsing/text'
 import { oneOf, lazy } from 'partsing/core/decoder'
-import { matchAnyCharOf } from 'partsing/text'
 
 const PLUS = matchChar('+')
 const MINUS = matchChar('-')
@@ -54,8 +54,8 @@ const WS = regexp(/^[\s_]+/m)
 const OWS = regexp(/^[\s_]*/m)
 // const OWS = WS.or(match(""))
 
-const MULTIPLICATION = matchAnyCharOf("*⋅×x") // .mapError(_ => '×')
-const DIVISION = matchAnyCharOf("/÷:") // .mapError(_ => '÷')
+const MULTIPLICATION = matchAnyCharOf('*⋅×x') // .mapError(_ => '×')
+const DIVISION = matchAnyCharOf('/÷:') // .mapError(_ => '÷')
 
 const lowOrHigh =
   oneOf(
@@ -119,10 +119,10 @@ const diceFunctorConst = (p: string, f: (times: UpTo | Always, range: Range) => 
   }))
 
 const diceFunctor = lazy(() => oneOf(
-  matchChar("e").skipNext(OWS).pickNext(positive.map(v => explode(always(), valueOrMore(v)))),
-  matchChar("r").skipNext(OWS).pickNext(positive.map(v => reroll(always(), valueOrLess(v)))),
-  diceFunctorConst("explode", explode),
-  diceFunctorConst("reroll", reroll),
+  matchChar('e').skipNext(OWS).pickNext(positive.map(v => explode(always(), valueOrMore(v)))),
+  matchChar('r').skipNext(OWS).pickNext(positive.map(v => reroll(always(), valueOrLess(v)))),
+  diceFunctorConst('explode', explode),
+  diceFunctorConst('reroll', reroll)
 ))
 
 const SUM = match('sum')
@@ -168,6 +168,8 @@ const binop = lazy(() => {
               default:
                 return binaryOp(item.op, left, item.right)
             }
+          default:
+            throw new Error('unreachable')
         }
       }, left)
     })
@@ -175,11 +177,11 @@ const binop = lazy(() => {
 })
 
 const dieExpression = oneOf(
-  matchChar("1").pickNext(die.map(makeDie)),
+  matchChar('1').pickNext(die.map(makeDie)),
   die.map(makeDie)
 ) // mapError 'die'
 const literalExpression = whole.map(literal) // mapError 'literal'
-const diceReduce = (reduceable: Decoder<TextInput, DiceReduceable, DecodeError>) => {
+const diceReduce = (reduceable: Decoder<TextInput, DiceReduceable, DecodeError>): Decoder<TextInput, DiceReduce, DecodeError> => {
   return reduceable.flatMap(red => {
     return OWS.pickNext(oneOf(
       SUM.withResult(DiceReducer.Sum),
@@ -227,10 +229,10 @@ const diceFilterable = lazy((): Decoder<TextInput, DiceReduceable, DecodeError> 
     commaSeparated(expression).map(v => filterableDiceExpressions(...v))
   ).flatMap(filterable => {
     return OWS.pickNext(oneOf(
-      matchChar("d").skipNext(OWS).pickNext(positive.map(v => drop(LowHigh.Low, v))),
-      dirValue(match("drop"), LowHigh.Low).map(v => drop(v.dir, v.value)),
-      matchChar("k").skipNext(OWS).pickNext(positive.map(v => keep(LowHigh.High, v))),
-      dirValue(match("keep"), LowHigh.High).map(v => keep(v.dir, v.value)),
+      matchChar('d').skipNext(OWS).pickNext(positive.map(v => drop(LowHigh.Low, v))),
+      dirValue(match('drop'), LowHigh.Low).map(v => drop(v.dir, v.value)),
+      matchChar('k').skipNext(OWS).pickNext(positive.map(v => keep(LowHigh.High, v))),
+      dirValue(match('keep'), LowHigh.High).map(v => keep(v.dir, v.value))
     )).map(dk => {
       return diceListWithFilter(filterable, dk)
     })
@@ -245,7 +247,7 @@ const diceMapeable = lazy((): Decoder<TextInput, DiceReduceable, DecodeError> =>
       })
     }),
     commaSeparated(die),
-    matchChar("1").pickNext(die).map(v => [v]),
+    matchChar('1').pickNext(die).map(v => [v]),
     die.map(v => [v])
   ).flatMap(arr => {
     return OWS.pickNext(diceFunctor.map(functor => {
@@ -275,7 +277,7 @@ const expression = lazy((): Decoder<TextInput, DiceExpression, DecodeError> => {
 const grammar: Decoder<TextInput, DiceExpression, DecodeError> =
   OWS.pickNext(expression).skipNext(OWS)
 
-const decode = (input: string) => {
+const decode = (input: string): DecodeResult<TextInput, DiceExpression, DecodeError> => {
   return grammar.run({ input, index: 0 })
 }
 
