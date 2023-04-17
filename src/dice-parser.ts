@@ -1,7 +1,7 @@
 import { type TextInput } from 'partsing/text'
 import { DE } from './dice-expression-domain'
 import {
-  LowHigh,
+  type LowHigh,
   type DiceExpression,
   between,
   valueOrMore,
@@ -14,14 +14,12 @@ import {
   type UpTo,
   type Always,
   unaryOp,
-  DiceUnOp,
-  DiceBinOp,
   binaryOp,
   die as makeDie,
   diceReduce as makeDiceReduce,
   literal,
   type DiceReduceable,
-  DiceReducer,
+  type DiceReducer,
   diceExpressions as makeDiceExpressions,
   filterableDiceArray,
   diceListWithFilter,
@@ -33,17 +31,17 @@ import {
   reroll,
   type DiceReduce
 } from './dice-expression'
-import { type DecodeError } from 'partsing/error'
+import { CustomError, type DecodeError } from 'partsing/error'
 import { type Decoder } from 'partsing/core/decoder'
 import { type DecodeResult } from 'partsing/core/result'
-import { matchChar, regexp, match, matchAnyCharOf } from 'partsing/text'
+import { matchChar, regexp, match, matchAnyCharOf, eoi } from 'partsing/text'
 import { oneOf, lazy } from 'partsing/core/decoder'
 
 const PLUS = matchChar('+')
 const MINUS = matchChar('-')
-const positive = regexp(/^[+]?([1-9][0-9]*)/, 1).map(Number)
-const negative = regexp(/^(-[1-9][0-9]*)/).map(Number)
-const whole = oneOf(positive, negative)
+const positive = regexp(/^[+]?([1-9][0-9]*)/, 1).map(Number).withFailure(new CustomError('positive number') as DecodeError)
+const negative = regexp(/^(-[1-9][0-9]*)/).map(Number).withFailure(new CustomError('negative number'))
+const whole = oneOf(positive, negative).withFailure(new CustomError('number'))
 const D = oneOf(matchChar('d'), matchChar('D'))
 
 const OPEN_SET_BRACKET = matchChar('(')
@@ -54,13 +52,13 @@ const WS = regexp(/^[\s_]+/m)
 const OWS = regexp(/^[\s_]*/m)
 // const OWS = WS.or(match(""))
 
-const MULTIPLICATION = matchAnyCharOf('*⋅×x') // .mapError(_ => '×')
-const DIVISION = matchAnyCharOf('/÷:') // .mapError(_ => '÷')
+const MULTIPLICATION = matchAnyCharOf('*⋅×x').withFailure(new CustomError('multiplication'))
+const DIVISION = matchAnyCharOf('/÷:').withFailure(new CustomError('division'))
 
 const lowOrHigh =
   oneOf(
-    oneOf(match('lowest'), match('low')).map(_ => LowHigh.Low),
-    oneOf(match('highest'), match('high')).map(_ => LowHigh.High)
+    oneOf(match('lowest'), match('low')).map(_ => 'low' as const),
+    oneOf(match('highest'), match('high')).map(_ => 'high' as const)
   )
 
 const dirValue = (prefix: Decoder<TextInput, unknown, DecodeError>, alt: LowHigh): Decoder<TextInput, { dir: LowHigh, value: number }, DecodeError> =>
@@ -71,18 +69,13 @@ const dirValue = (prefix: Decoder<TextInput, unknown, DecodeError>, alt: LowHigh
     positive.map(value => ({ dir: alt, value }))
   ))
 
-enum MoreOrLess {
-  More = 'more',
-  Less = 'less'
-}
-
 const moreLess =
   oneOf(
-    match('more').map(_ => MoreOrLess.More),
-    match('less').map(_ => MoreOrLess.Less)
+    match('more').map(_ => 'more' as const),
+    match('less').map(_ => 'less' as const)
   )
 
-const orMoreLess = match('or').skipNext(OWS).pickNext(moreLess) // .mapError(_ => 'or (more|less)')
+const orMoreLess = match('or').skipNext(OWS).pickNext(moreLess).withFailure(new CustomError('or (more|less)'))
 const on = match('on').skipNext(WS).pickNext(positive)
 const range = oneOf(
   on.flatMap(min => {
@@ -91,8 +84,8 @@ const range = oneOf(
   on.flatMap(value => {
     return OWS.pickNext(orMoreLess.map(oml => {
       switch (oml) {
-        case MoreOrLess.More: return valueOrMore(value)
-        case MoreOrLess.Less: return valueOrLess(value)
+        case 'more': return valueOrMore(value)
+        case 'less': return valueOrLess(value)
         default: throw new Error('unreachable')
       }
     }))
@@ -128,24 +121,24 @@ const diceFunctor = lazy(() => oneOf(
 const SUM = match('sum')
 const AVERAGE = oneOf(match('average'), match('avg'))
 const MEDIAN = oneOf(match('median'), match('med'))
-const MIN = oneOf(match('min'), match('minimum'), match('take least'))
-const MAX = oneOf(match('max'), match('maximum'), match('take best'))
+const MIN = oneOf(match('minimum'), match('min'), match('take least'))
+const MAX = oneOf(match('maximum'), match('max'), match('take best'))
 
 const DEFAULT_DIE_SIDES = 6
 const die = oneOf(
   D.skipNext(PERCENT).withResult(100),
   D.pickNext(positive),
   D.withResult(DEFAULT_DIE_SIDES)
-) // .mapError(_ => 'one die')
+).withFailure(new CustomError('one die'))
 
-const negate = lazy(() => MINUS.pickNext(termExpression).map(expr => unaryOp(DiceUnOp.Negate, expr))) // .mapError(_ => 'negate')
+const negate = lazy(() => MINUS.pickNext(termExpression).map(expr => unaryOp('negate', expr))) // .mapError(_ => 'negate')
 const unary = negate
 
 const binOpSymbol = oneOf(
-  PLUS.withResult(DiceBinOp.Sum),
-  MINUS.withResult(DiceBinOp.Difference),
-  MULTIPLICATION.withResult(DiceBinOp.Multiplication),
-  DIVISION.withResult(DiceBinOp.Division)
+  PLUS.withResult('sum'),
+  MINUS.withResult('difference'),
+  MULTIPLICATION.withResult('multiplication'),
+  DIVISION.withResult('division')
 )
 
 const opRight = OWS.pickNext(binOpSymbol.flatMap(op => {
@@ -157,11 +150,11 @@ const binop = lazy(() => {
     return opRight.atLeast(1).map(a => {
       return a.reduce((left: DiceExpression, item) => {
         switch (item.op) {
-          case DiceBinOp.Sum:
-          case DiceBinOp.Difference:
+          case 'sum':
+          case 'difference':
             return binaryOp(item.op, left, item.right)
-          case DiceBinOp.Division:
-          case DiceBinOp.Multiplication:
+          case 'division':
+          case 'multiplication':
             switch (left.type) {
               case 'binary-op':
                 return binaryOp(left.op, left.left, binaryOp(item.op, left.right, item.right))
@@ -180,18 +173,18 @@ const dieExpression = oneOf(
   matchChar('1').pickNext(die.map(makeDie)),
   die.map(makeDie)
 ) // mapError 'die'
-const literalExpression = whole.map(literal) // mapError 'literal'
+const literalExpression = whole.map(literal)
 const diceReduce = (reduceable: Decoder<TextInput, DiceReduceable, DecodeError>): Decoder<TextInput, DiceReduce, DecodeError> => {
   return reduceable.flatMap(red => {
     return OWS.pickNext(oneOf(
-      SUM.withResult(DiceReducer.Sum),
-      AVERAGE.withResult(DiceReducer.Average),
-      MEDIAN.withResult(DiceReducer.Median),
-      MIN.withResult(DiceReducer.Min),
-      MAX.withResult(DiceReducer.Max)
-    )).map(reducer => makeDiceReduce(red, reducer))
+      SUM.withResult('sum'),
+      AVERAGE.withResult('average'),
+      MEDIAN.withResult('median'),
+      MIN.withResult('min'),
+      MAX.withResult('max')
+    )).map(reducer => makeDiceReduce(red, reducer as DiceReducer))
   }).or(
-    reduceable.map(v => makeDiceReduce(v, DiceReducer.Sum))
+    reduceable.map(v => makeDiceReduce(v, 'sum'))
   )
 }
 
@@ -229,10 +222,10 @@ const diceFilterable = lazy((): Decoder<TextInput, DiceReduceable, DecodeError> 
     commaSeparated(expression).map(v => filterableDiceExpressions(...v))
   ).flatMap(filterable => {
     return OWS.pickNext(oneOf(
-      matchChar('d').skipNext(OWS).pickNext(positive.map(v => drop(LowHigh.Low, v))),
-      dirValue(match('drop'), LowHigh.Low).map(v => drop(v.dir, v.value)),
-      matchChar('k').skipNext(OWS).pickNext(positive.map(v => keep(LowHigh.High, v))),
-      dirValue(match('keep'), LowHigh.High).map(v => keep(v.dir, v.value))
+      matchChar('d').skipNext(OWS).pickNext(positive.map(v => drop('low', v))),
+      dirValue(match('drop'), 'low').map(v => drop(v.dir, v.value)),
+      matchChar('k').skipNext(OWS).pickNext(positive.map(v => keep('high', v))),
+      dirValue(match('keep'), 'high').map(v => keep(v.dir, v.value))
     )).map(dk => {
       return diceListWithFilter(filterable, dk)
     })
@@ -272,10 +265,10 @@ const expression = lazy((): Decoder<TextInput, DiceExpression, DecodeError> => {
     binop,
     termExpression
   )
-}) // mapError 'expression'
+}).withFailure(new CustomError('expression'))
 
 const grammar: Decoder<TextInput, DiceExpression, DecodeError> =
-  OWS.pickNext(expression).skipNext(OWS)
+  OWS.pickNext(expression).skipNext(OWS).skipNext(eoi)
 
 const decode = (input: string): DecodeResult<TextInput, DiceExpression, DecodeError> => {
   return grammar.run({ input, index: 0 })

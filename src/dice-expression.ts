@@ -84,13 +84,7 @@ export type DiceExpression =
   | BinaryOp
   | UnaryOp
 
-export enum DiceReducer {
-  Sum = 'sum',
-  Min = 'min',
-  Max = 'max',
-  Average = 'average',
-  Median = 'median',
-}
+export type DiceReducer = 'sum' | 'min' | 'max' | 'average' | 'median'
 
 export interface DiceExpressions {
   type: 'dice-expressions'
@@ -335,21 +329,11 @@ export type Range =
   | ValueOrLess
   | Composite
 
-export enum LowHigh {
-  Low = 'low',
-  High = 'high',
-}
+export type LowHigh = 'low' | 'high'
 
-export enum DiceBinOp {
-  Sum = 'sum',
-  Difference = 'difference',
-  Multiplication = 'multiplication',
-  Division = 'division',
-}
+export type DiceBinOp = 'sum' | 'difference' | 'multiplication' | 'division'
 
-export enum DiceUnOp {
-  Negate = 'negate',
-}
+export type DiceUnOp = 'negate'
 
 export interface InsufficientSides {
   type: 'insufficient-sides'

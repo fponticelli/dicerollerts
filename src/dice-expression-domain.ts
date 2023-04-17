@@ -1,4 +1,4 @@
-import { DiceReducer, type DiceBinOp, type DiceExpression, type DiceFunctor, type DiceListWithFilter, type DiceReduce, type DiceReduceable, type DiceUnOp, type Range, type Sides, type Times, type ValidationMessage, type DiceFilter, LowHigh, insufficientSides, emptySet, tooManyDrops, tooManyKeeps, dropOrKeepShouldBePositive } from './dice-expression'
+import { type DiceReducer, type DiceBinOp, type DiceExpression, type DiceFunctor, type DiceListWithFilter, type DiceReduce, type DiceReduceable, type DiceUnOp, type Range, type Sides, type Times, type ValidationMessage, type DiceFilter, insufficientSides, emptySet, tooManyDrops, tooManyKeeps, dropOrKeepShouldBePositive } from './dice-expression'
 import { Roller } from './roller'
 
 function distinctPrimitive<T> (xs: T[]): T[] {
@@ -38,7 +38,6 @@ function binOpToString (op: DiceBinOp): string {
     case 'division':
       return '/'
   }
-  throw new Error(`Unknown binary operator: ${op}`)
 }
 
 function unaryOpToString (op: DiceUnOp): string {
@@ -46,7 +45,6 @@ function unaryOpToString (op: DiceUnOp): string {
     case 'negate':
       return '-'
   }
-  throw new Error(`Unknown unary operator: ${op}`)
 }
 
 export const DE = {
@@ -146,23 +144,23 @@ export const DE = {
 
   expressionExtractorToString (reducer: DiceReducer): string {
     switch (reducer) {
-      case DiceReducer.Sum: return ''
-      case DiceReducer.Min: return ' min'
-      case DiceReducer.Max: return ' max'
-      case DiceReducer.Average: return ' average'
-      case DiceReducer.Median: return ' median'
+      case 'sum': return ''
+      case 'min': return ' min'
+      case 'max': return ' max'
+      case 'average': return ' average'
+      case 'median': return ' median'
     }
   },
 
   diceFilterToString (filter: DiceFilter): string {
     if (filter.type === 'drop') {
-      if (filter.dir === LowHigh.Low) {
+      if (filter.dir === 'low') {
         return ` drop ${filter.value}`
       } else {
         return ` drop highest ${filter.value}`
       }
     } else {
-      if (filter.dir === LowHigh.High) {
+      if (filter.dir === 'high') {
         return ` keep ${filter.value}`
       } else {
         return ` keep lowest ${filter.value}`

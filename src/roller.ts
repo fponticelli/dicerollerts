@@ -1,4 +1,4 @@
-import { type Range, type DiceFilter, type DiceFunctor, DiceReducer, type Roll, type DiceExpression, DiceBinOp, type DiceReduce, die, LowHigh, DiceUnOp } from './dice-expression'
+import { type Range, type DiceFilter, type DiceFunctor, type DiceReducer, type Roll, type DiceExpression, type DiceReduce, die } from './dice-expression'
 import { keepResult, discardResult, rerolled, normal, exploded, diceMapeableResult, diceReduceResult, diceFilterableResult, diceExpressionsResult, binaryOpResult, literalResult, dieResult, unaryOpResult } from './roll-result'
 import { oneResult, type DiceResultMapped, type DieResult, type DieResultFilter, type RollResult } from './roll-result'
 import { RR } from './roll-result-domain'
@@ -65,13 +65,13 @@ export class Roller {
   static filterf (filter: DiceFilter): (res: number, length: number) => boolean {
     switch (filter.type) {
       case 'drop':
-        if (filter.dir === LowHigh.Low) {
+        if (filter.dir === 'low') {
           return (res) => res >= filter.value
         } else {
           return (res, length) => res < length - filter.value
         }
       case 'keep':
-        if (filter.dir === LowHigh.High) {
+        if (filter.dir === 'high') {
           return (res, length) => res >= length - filter.value
         } else {
           return (res) => res < filter.value
@@ -130,21 +130,21 @@ export class Roller {
     } else if (expr.type === 'binary-op') {
       const left = this.roll(expr.left)
       const right = this.roll(expr.right)
-      if (expr.op === DiceBinOp.Sum) {
-        return binaryOpResult(DiceBinOp.Sum, left, right, RR.getResult(left) + RR.getResult(right))
-      } else if (expr.op === DiceBinOp.Difference) {
-        return binaryOpResult(DiceBinOp.Difference, left, right, RR.getResult(left) - RR.getResult(right))
-      } else if (expr.op === DiceBinOp.Multiplication) {
-        return binaryOpResult(DiceBinOp.Multiplication, left, right, RR.getResult(left) * RR.getResult(right))
-      } else if (expr.op === DiceBinOp.Division) {
-        return binaryOpResult(DiceBinOp.Division, left, right, Math.trunc(RR.getResult(left) / RR.getResult(right)))
+      if (expr.op === 'sum') {
+        return binaryOpResult('sum', left, right, RR.getResult(left) + RR.getResult(right))
+      } else if (expr.op === 'difference') {
+        return binaryOpResult('difference', left, right, RR.getResult(left) - RR.getResult(right))
+      } else if (expr.op === 'multiplication') {
+        return binaryOpResult('multiplication', left, right, RR.getResult(left) * RR.getResult(right))
+      } else if (expr.op === 'division') {
+        return binaryOpResult('division', left, right, Math.trunc(RR.getResult(left) / RR.getResult(right)))
       } else {
         throw new Error(`Invalid binary operation ${JSON.stringify(expr)}`)
       }
     } else if (expr.type === 'unary-op') {
       const inner = this.roll(expr.expr)
-      if (expr.op === DiceUnOp.Negate) {
-        return unaryOpResult(DiceUnOp.Negate, inner, -RR.getResult(inner))
+      if (expr.op === 'negate') {
+        return unaryOpResult('negate', inner, -RR.getResult(inner))
       } else {
         throw new Error(`Invalid unary operation ${JSON.stringify(expr)}`)
       }
@@ -233,11 +233,11 @@ export class Roller {
 
   reduceResults (results: number[], reducer: DiceReducer): number {
     switch (reducer) {
-      case DiceReducer.Average: return Math.round(results.reduce((a, b) => a + b, 0) / results.length)
-      case DiceReducer.Median: return median(results)
-      case DiceReducer.Sum: return results.reduce((a, b) => a + b, 0)
-      case DiceReducer.Min: return Math.min(...results)
-      case DiceReducer.Max: return Math.max(...results)
+      case 'average': return Math.round(results.reduce((a, b) => a + b, 0) / results.length)
+      case 'median': return median(results)
+      case 'sum': return results.reduce((a, b) => a + b, 0)
+      case 'min': return Math.min(...results)
+      case 'max': return Math.max(...results)
     }
   }
 

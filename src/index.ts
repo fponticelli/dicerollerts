@@ -1,6 +1,6 @@
 export { DE } from './dice-expression-domain'
 export {
-  DiceBinOp, DiceUnOp, DiceReducer, LowHigh, always,
+  type DiceBinOp, type DiceUnOp, type DiceReducer, type LowHigh, always,
   between,
   binaryOp,
   composite,

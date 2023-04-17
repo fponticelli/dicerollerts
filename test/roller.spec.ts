@@ -24,72 +24,72 @@ const tests: {
       min: literalResult(6, 6),
       max: literalResult(6, 6),
     }, {
-      test: diceReduce(diceExpressions(literal(1), literal(2), literal(3)), DiceReducer.Sum),
-      min: diceReduceResult(diceExpressionsResult([literalResult(1, 1), literalResult(2, 2), literalResult(3, 3)]), DiceReducer.Sum, 6),
-      max: diceReduceResult(diceExpressionsResult([literalResult(1, 1), literalResult(2, 2), literalResult(3, 3)]), DiceReducer.Sum, 6),
+      test: diceReduce(diceExpressions(literal(1), literal(2), literal(3)), 'sum'),
+      min: diceReduceResult(diceExpressionsResult([literalResult(1, 1), literalResult(2, 2), literalResult(3, 3)]), 'sum', 6),
+      max: diceReduceResult(diceExpressionsResult([literalResult(1, 1), literalResult(2, 2), literalResult(3, 3)]), 'sum', 6),
     }, {
-      test: diceReduce(diceExpressions(literal(1), literal(2), literal(3)), DiceReducer.Average),
-      min: diceReduceResult(diceExpressionsResult([literalResult(1, 1), literalResult(2, 2), literalResult(3, 3)]), DiceReducer.Average, 2),
-      max: diceReduceResult(diceExpressionsResult([literalResult(1, 1), literalResult(2, 2), literalResult(3, 3)]), DiceReducer.Average, 2),
+      test: diceReduce(diceExpressions(literal(1), literal(2), literal(3)), 'average'),
+      min: diceReduceResult(diceExpressionsResult([literalResult(1, 1), literalResult(2, 2), literalResult(3, 3)]), 'average', 2),
+      max: diceReduceResult(diceExpressionsResult([literalResult(1, 1), literalResult(2, 2), literalResult(3, 3)]), 'average', 2),
     }, {
-      test: diceReduce(diceExpressions(literal(1), literal(2), literal(3)), DiceReducer.Min),
-      min: diceReduceResult(diceExpressionsResult([literalResult(1, 1), literalResult(2, 2), literalResult(3, 3)]), DiceReducer.Min, 1),
-      max: diceReduceResult(diceExpressionsResult([literalResult(1, 1), literalResult(2, 2), literalResult(3, 3)]), DiceReducer.Min, 1),
+      test: diceReduce(diceExpressions(literal(1), literal(2), literal(3)), 'min'),
+      min: diceReduceResult(diceExpressionsResult([literalResult(1, 1), literalResult(2, 2), literalResult(3, 3)]), 'min', 1),
+      max: diceReduceResult(diceExpressionsResult([literalResult(1, 1), literalResult(2, 2), literalResult(3, 3)]), 'min', 1),
     }, {
-      test: diceReduce(diceExpressions(literal(1), literal(2), literal(3)), DiceReducer.Max),
-      min: diceReduceResult(diceExpressionsResult([literalResult(1, 1), literalResult(2, 2), literalResult(3, 3)]), DiceReducer.Max, 3),
-      max: diceReduceResult(diceExpressionsResult([literalResult(1, 1), literalResult(2, 2), literalResult(3, 3)]), DiceReducer.Max, 3),
+      test: diceReduce(diceExpressions(literal(1), literal(2), literal(3)), 'max'),
+      min: diceReduceResult(diceExpressionsResult([literalResult(1, 1), literalResult(2, 2), literalResult(3, 3)]), 'max', 3),
+      max: diceReduceResult(diceExpressionsResult([literalResult(1, 1), literalResult(2, 2), literalResult(3, 3)]), 'max', 3),
     }, {
-      test: diceReduce(diceListWithFilter(filterableDiceExpressions(literal(1), literal(2), literal(3)), drop(LowHigh.Low, 1)), DiceReducer.Sum),
-      min: diceReduceResult(diceFilterableResult([discardResult(literalResult(1, 1)), keepResult(literalResult(2, 2)), keepResult(literalResult(3, 3))], drop(LowHigh.Low, 1)), DiceReducer.Sum, 5),
-      max: diceReduceResult(diceFilterableResult([discardResult(literalResult(1, 1)), keepResult(literalResult(2, 2)), keepResult(literalResult(3, 3))], drop(LowHigh.Low, 1)), DiceReducer.Sum, 5),
+      test: diceReduce(diceListWithFilter(filterableDiceExpressions(literal(1), literal(2), literal(3)), drop('low', 1)), 'sum'),
+      min: diceReduceResult(diceFilterableResult([discardResult(literalResult(1, 1)), keepResult(literalResult(2, 2)), keepResult(literalResult(3, 3))], drop('low', 1)), 'sum', 5),
+      max: diceReduceResult(diceFilterableResult([discardResult(literalResult(1, 1)), keepResult(literalResult(2, 2)), keepResult(literalResult(3, 3))], drop('low', 1)), 'sum', 5),
     }, {
-      test: diceReduce(diceListWithMap([2, 3, 4], explode(upTo(1), valueOrMore(3))), DiceReducer.Sum),
+      test: diceReduce(diceListWithMap([2, 3, 4], explode(upTo(1), valueOrMore(3))), 'sum'),
       min: diceReduceResult(diceMapeableResult([
         normal(dieResult(1, 2)),
         normal(dieResult(1, 3)),
         normal(dieResult(1, 4))
-      ], explode(upTo(1), valueOrMore(3))), DiceReducer.Sum, 3),
+      ], explode(upTo(1), valueOrMore(3))), 'sum', 3),
       max: diceReduceResult(diceMapeableResult([
         normal(dieResult(2, 2)),
         exploded([dieResult(3, 3), dieResult(3, 3)]),
         exploded([dieResult(4, 4), dieResult(4, 4)])
-      ], explode(upTo(1), valueOrMore(3))), DiceReducer.Sum, 16),
+      ], explode(upTo(1), valueOrMore(3))), 'sum', 16),
     }, {
-      test: diceReduce(diceListWithMap([2, 3, 4], reroll(upTo(1), valueOrMore(3))), DiceReducer.Sum),
+      test: diceReduce(diceListWithMap([2, 3, 4], reroll(upTo(1), valueOrMore(3))), 'sum'),
       min: diceReduceResult(diceMapeableResult([
         normal(dieResult(1, 2)),
         normal(dieResult(1, 3)),
         normal(dieResult(1, 4))
-      ], reroll(upTo(1), valueOrMore(3))), DiceReducer.Sum, 3),
+      ], reroll(upTo(1), valueOrMore(3))), 'sum', 3),
       max: diceReduceResult(diceMapeableResult([
         normal(dieResult(2, 2)),
         rerolled([dieResult(3, 3), dieResult(3, 3)]),
         rerolled([dieResult(4, 4), dieResult(4, 4)])
-      ], reroll(upTo(1), valueOrMore(3))), DiceReducer.Sum, 9),
+      ], reroll(upTo(1), valueOrMore(3))), 'sum', 9),
     }, {
-      test: binaryOp(DiceBinOp.Sum, literal(3), die(2)),
+      test: binaryOp('sum', literal(3), die(2)),
       min: binaryOpResult(
-        DiceBinOp.Sum,
+        'sum',
         literalResult(3, 3),
         oneResult(dieResult(1, 2)),
         4
       ),
       max: binaryOpResult(
-        DiceBinOp.Sum,
+        'sum',
         literalResult(3, 3),
         oneResult(dieResult(2, 2)),
         5
       ),
     }, {
-      test: unaryOp(DiceUnOp.Negate, literal(3)),
+      test: unaryOp('negate', literal(3)),
       min: unaryOpResult(
-        DiceUnOp.Negate,
+        'negate',
         literalResult(3, 3),
         -3
       ),
       max: unaryOpResult(
-        DiceUnOp.Negate,
+        'negate',
         literalResult(3, 3),
         -3
       ),
