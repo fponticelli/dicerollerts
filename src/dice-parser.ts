@@ -29,7 +29,8 @@ import {
   diceListWithMap,
   explode,
   reroll,
-  type DiceReduce
+  type DiceReduce,
+  emphasis
 } from './dice-expression'
 import { CustomError, type DecodeError } from 'partsing/error'
 import { type Decoder } from 'partsing/core/decoder'
@@ -106,16 +107,37 @@ const functorTimes = oneOf(
   match('').withResult(always()) // strange empty matching
 )
 
+const emphasisConst = lazy(() => oneOf(
+  match('emphasis').skipNext(WS).flatMap(() => {
+    return oneOf(
+      match('high').withResult(emphasis('high', 'average')),
+      match('low').withResult(emphasis('low', 'average')),
+      match('reroll').withResult(emphasis('reroll', 'average'))
+
+    )
+  }),
+  match('emphasis').withResult(emphasis('reroll', 'average')),
+  match('furthest from').skipNext(WS).pickNext(positive).flatMap(value => {
+    return oneOf(
+      WS.skipNext(match('high')).withResult(emphasis('high', value)),
+      WS.skipNext(match('low')).withResult(emphasis('low', value)),
+      WS.skipNext(match('reroll')).withResult(emphasis('reroll', value))
+    )
+  }),
+  match('furthest from').skipNext(WS).pickNext(positive).map(value => emphasis('reroll', value))
+))
+
 const diceFunctorConst = (p: string, f: (times: UpTo | Always, range: Range) => DiceFunctor): Decoder<TextInput, DiceFunctor, DecodeError> =>
   match(p).skipNext(OWS).pickNext(functorTimes.flatMap(times => {
     return OWS.pickNext(range.map(range => f(times, range)))
   }))
 
 const diceFunctor = lazy(() => oneOf(
-  matchChar('e').skipNext(OWS).pickNext(positive.map(v => explode(always(), valueOrMore(v)))),
-  matchChar('r').skipNext(OWS).pickNext(positive.map(v => reroll(always(), valueOrLess(v)))),
+  emphasisConst,
   diceFunctorConst('explode', explode),
-  diceFunctorConst('reroll', reroll)
+  diceFunctorConst('reroll', reroll),
+  matchChar('e').skipNext(OWS).pickNext(positive.map(v => explode(always(), valueOrMore(v)))),
+  matchChar('r').skipNext(OWS).pickNext(positive.map(v => reroll(always(), valueOrLess(v))))
 ))
 
 const SUM = match('sum')

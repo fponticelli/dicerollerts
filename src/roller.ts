@@ -46,6 +46,25 @@ function rank<T> (array: T[], compare: (a: T, b: T) => number, incrementDuplicat
   return ranks
 }
 
+function pickFurthest (first: number, second: number, furthestValue: number, tieBreaker: 'high' | 'low' | 'reroll'): 'first' | 'second' | 'tie' {
+  const firstDistance = Math.abs(first - furthestValue)
+  const secondDistance = Math.abs(second - furthestValue)
+  if (firstDistance > secondDistance) {
+    return 'first'
+  } else if (secondDistance > firstDistance) {
+    return 'second'
+  } else {
+    switch (tieBreaker) {
+      case 'high':
+        return first > second ? 'first' : 'second'
+      case 'low':
+        return first < second ? 'first' : 'second'
+      case 'reroll':
+        return 'tie'
+    }
+  }
+}
+
 export class Roller {
   static matchRange (r: number, range: Range): boolean {
     switch (range.type) {
@@ -154,6 +173,9 @@ export class Roller {
   }
 
   mapRolls (rolls: DieResult[], functor: DiceFunctor): DiceResultMapped[] {
+    if (functor.type === 'emphasis') {
+      return rolls.map(roll => this.emphasisRoll(roll, functor.furthestFrom, functor.tieBreaker))
+    }
     const times = functor.times
     switch (functor.type) {
       case 'explode':
@@ -168,6 +190,22 @@ export class Roller {
         } else {
           return rolls.map(roll => this.rerollRoll(roll, times.value, functor.range))
         }
+    }
+  }
+
+  emphasisRoll (roll: DieResult, furthestFrom: number | 'average', tieBreaker: 'low' | 'high' | 'reroll'): DiceResultMapped {
+    let rolls = [roll.result, this.dieRoll(roll.sides)]
+    const furthestValue = furthestFrom === 'average' ? Math.floor(roll.sides / 2) : furthestFrom
+    let result = pickFurthest(rolls[0], rolls[1], furthestValue, tieBreaker)
+    for (let i = 0; i < 100; i++) {
+      if (result !== 'tie') { break }
+      rolls = [this.dieRoll(roll.sides), this.dieRoll(roll.sides)]
+      result = pickFurthest(rolls[0], rolls[1], furthestValue, tieBreaker)
+    }
+    if (result === 'first') {
+      return rerolled([dieResult(rolls[1], roll.sides), dieResult(rolls[0], roll.sides)])
+    } else {
+      return rerolled([dieResult(rolls[0], roll.sides), dieResult(rolls[1], roll.sides)])
     }
   }
 

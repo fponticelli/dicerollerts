@@ -77,16 +77,34 @@ export const DE = {
   },
 
   diceBagToString (dice: Sides[], functor: DiceFunctor): string {
+    if (functor.type === 'emphasis') {
+      const sides = DE.sidesToString(dice)
+      const suffix = ((): string[] => {
+        switch (functor.furthestFrom) {
+          case 'average':
+            return ['emphasis']
+          default:
+            return ['furthest from', String(functor.furthestFrom)]
+        }
+      })()
+      if (functor.tieBreaker === 'high') {
+        suffix.push('high')
+      } else if (functor.tieBreaker === 'low') {
+        suffix.push('low')
+      }
+
+      return `${sides} ${suffix.join(' ')}`
+    }
     const sides = DE.sidesToString(dice)
     const suffix = (() => {
       switch (functor.type) {
         case 'explode':
-          return [' explode']
+          return ['explode']
         case 'reroll':
-          return [' reroll']
+          return ['reroll']
       }
     })().concat([DE.timesToString(functor.times), DE.rangeToString(functor.range)].filter(x => x !== '')).join(' ')
-    return `${sides}${suffix}`
+    return `${sides} ${suffix}`
   },
 
   sidesToString (dice: Sides[]): string {

@@ -109,7 +109,17 @@ const testObjects: TestObject[] = [
   { min: 3, max: 18, t: "3d6 reroll twice on 6" },
   { min: 3, max: 18, t: "3d6 reroll 5 times on 6" },
   { min: 1, max: 6, t: "d6 reroll once on 6" },
-  { min: 1, max: 6, t: "1d6 reroll once on 6", p: "d6 reroll once on 6" }
+  { min: 1, max: 6, t: "1d6 reroll once on 6", p: "d6 reroll once on 6" },
+
+  { min: 1, max: 20, t: "d20 emphasis reroll", p: "d20 emphasis" },
+  { min: 1, max: 20, t: "d20 emphasis", p: "d20 emphasis" },
+  { min: 1, max: 20, t: "d20 emphasis high", p: "d20 emphasis high" },
+  { min: 1, max: 20, t: "d20 emphasis low", p: "d20 emphasis low" },
+
+  { min: 1, t: "d20 furthest from 10", p: "d20 furthest from 10" },
+  { min: 1, t: "d20 furthest from 10 reroll", p: "d20 furthest from 10" },
+  { min: 1, t: "d20 furthest from 10 high", p: "d20 furthest from 10 high" },
+  { min: 1, t: "d20 furthest from 10 low", p: "d20 furthest from 10 low" },
 ];
 
 function fail(reason = "fail was called in a test.") {
