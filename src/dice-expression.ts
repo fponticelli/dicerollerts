@@ -227,9 +227,27 @@ export function reroll (times: Times, range: Range): Reroll {
   }
 }
 
+export interface Emphasis {
+  type: 'emphasis'
+  tieBreaker: 'high' | 'low' | 'reroll'
+  furthestFrom: number | 'average'
+}
+
+export function emphasis (
+  tieBreaker: 'high' | 'low' | 'reroll',
+  furthestFrom: number | 'average'
+): Emphasis {
+  return {
+    type: 'emphasis',
+    tieBreaker,
+    furthestFrom
+  }
+}
+
 export type DiceFunctor =
   | Explode
   | Reroll
+  | Emphasis
 
 export interface Always {
   type: 'always'
