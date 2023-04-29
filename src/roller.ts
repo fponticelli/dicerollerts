@@ -203,9 +203,9 @@ export class Roller {
       result = pickFurthest(rolls[0], rolls[1], furthestValue, tieBreaker)
     }
     if (result === 'first') {
-      return normal(dieResult(rolls[0], roll.sides))
+      return rerolled([dieResult(rolls[1], roll.sides), dieResult(rolls[0], roll.sides)])
     } else {
-      return normal(dieResult(rolls[1], roll.sides))
+      return rerolled([dieResult(rolls[0], roll.sides), dieResult(rolls[1], roll.sides)])
     }
   }
 
