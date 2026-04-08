@@ -206,7 +206,17 @@ export function normal(roll: DieResult): Normal {
   }
 }
 
-export type DiceResultMapped = Rerolled | Exploded | Normal
+export interface Compounded {
+  type: 'compounded'
+  rolls: DieResult[]
+  total: number
+}
+
+export function compounded(rolls: DieResult[], total: number): Compounded {
+  return { type: 'compounded', rolls, total }
+}
+
+export type DiceResultMapped = Rerolled | Exploded | Normal | Compounded
 
 export interface DieResult {
   type: 'die-result'

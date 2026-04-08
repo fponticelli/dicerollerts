@@ -14,6 +14,7 @@ import {
   rerolled,
   normal,
   exploded,
+  compounded,
   diceMapeableResult,
   diceReduceResult,
   diceFilterableResult,
@@ -280,6 +281,12 @@ export class Roller {
         this.emphasisRoll(roll, functor.furthestFrom, functor.tieBreaker),
       )
     }
+    if (functor.type === 'compound') {
+      const limit = functor.times.type === 'always'
+        ? this.options.maxExplodeIterations
+        : functor.times.value
+      return rolls.map((roll) => this.compoundRoll(roll, limit, functor.range))
+    }
     const times = functor.times
     switch (functor.type) {
       case 'explode':
@@ -303,6 +310,23 @@ export class Roller {
           )
         }
     }
+  }
+
+  compoundRoll(roll: DieResult, times: number, range: Range): DiceResultMapped {
+    const rolls = [roll]
+    let total = roll.result
+    let curr = roll
+    let remaining = times
+    while (remaining > 0 && Roller.matchRange(curr.result, range)) {
+      curr = dieResult(this.dieRoll(curr.sides), curr.sides)
+      rolls.push(curr)
+      total += curr.result
+      remaining--
+    }
+    if (rolls.length === 1) {
+      return normal(rolls[0])
+    }
+    return compounded(rolls, total)
   }
 
   emphasisRoll(
@@ -366,6 +390,8 @@ export class Roller {
           return [roll.rerolls[roll.rerolls.length - 1]]
         case 'exploded':
           return roll.explosions
+        case 'compounded':
+          return [dieResult(roll.total, roll.rolls[0].sides)]
         default:
           throw new Error(`Invalid mapped roll ${JSON.stringify(roll)}`)
       }

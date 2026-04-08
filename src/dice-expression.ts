@@ -247,7 +247,17 @@ export function emphasis(
   }
 }
 
-export type DiceFunctor = Explode | Reroll | Emphasis
+export interface Compound {
+  type: 'compound'
+  times: Times
+  range: Range
+}
+
+export function compound(times: Times, range: Range): Compound {
+  return { type: 'compound', times, range }
+}
+
+export type DiceFunctor = Explode | Reroll | Emphasis | Compound
 
 export interface Always {
   type: 'always'
