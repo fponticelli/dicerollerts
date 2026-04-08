@@ -1,4 +1,16 @@
-import { die, literal, binaryOp, diceReduce, diceExpressions, customDie, unaryOp, diceListWithMap, explode, always, exact } from '../src/dice-expression'
+import {
+  die,
+  literal,
+  binaryOp,
+  diceReduce,
+  diceExpressions,
+  customDie,
+  unaryOp,
+  diceListWithMap,
+  explode,
+  always,
+  exact,
+} from '../src/dice-expression'
 import { DiceStats } from '../src/dice-stats'
 
 describe('exact probability analysis', () => {
@@ -61,7 +73,9 @@ describe('exact probability analysis', () => {
   })
 
   test('d6 * 2 distribution', () => {
-    const dist = DiceStats.distribution(binaryOp('multiplication', die(6), literal(2)))
+    const dist = DiceStats.distribution(
+      binaryOp('multiplication', die(6), literal(2)),
+    )
     expect(dist.size).toBe(6)
     expect(dist.get(2)).toBeCloseTo(1 / 6)
   })

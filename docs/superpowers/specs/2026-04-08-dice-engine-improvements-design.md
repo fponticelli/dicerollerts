@@ -82,13 +82,13 @@ Difference from regular explode: exploded values are summed into the original di
 
 ```ts
 interface RollerOptions {
-  maxExplodeIterations?: number   // default 100
-  maxRerollIterations?: number    // default 100
-  maxEmphasisIterations?: number  // default 100
+  maxExplodeIterations?: number // default 100
+  maxRerollIterations?: number // default 100
+  maxEmphasisIterations?: number // default 100
 }
 
-new Roller(rollFn)                                // unchanged
-new Roller(rollFn, { maxExplodeIterations: 50 })  // override
+new Roller(rollFn) // unchanged
+new Roller(rollFn, { maxExplodeIterations: 50 }) // override
 ```
 
 Replaces hardcoded limits in `explodeRoll`, `rerollRoll`, and `emphasisRoll`. Compound exploding also respects `maxExplodeIterations`.

@@ -282,9 +282,10 @@ export class Roller {
       )
     }
     if (functor.type === 'compound') {
-      const limit = functor.times.type === 'always'
-        ? this.options.maxExplodeIterations
-        : functor.times.value
+      const limit =
+        functor.times.type === 'always'
+          ? this.options.maxExplodeIterations
+          : functor.times.value
       return rolls.map((roll) => this.compoundRoll(roll, limit, functor.range))
     }
     const times = functor.times
@@ -292,7 +293,11 @@ export class Roller {
       case 'explode':
         if (times.type === 'always') {
           return rolls.map((roll) =>
-            this.explodeRoll(roll, this.options.maxExplodeIterations, functor.range),
+            this.explodeRoll(
+              roll,
+              this.options.maxExplodeIterations,
+              functor.range,
+            ),
           )
         } else {
           return rolls.map((roll) =>
@@ -302,7 +307,11 @@ export class Roller {
       case 'reroll':
         if (times.type === 'always') {
           return rolls.map((roll) =>
-            this.rerollRoll(roll, this.options.maxRerollIterations, functor.range),
+            this.rerollRoll(
+              roll,
+              this.options.maxRerollIterations,
+              functor.range,
+            ),
           )
         } else {
           return rolls.map((roll) =>
@@ -428,7 +437,8 @@ export class Roller {
 
   reduceResults(results: number[], reducer: DiceReducer): number {
     if (typeof reducer === 'object' && reducer.type === 'count') {
-      return results.filter((r) => Roller.matchRange(r, reducer.threshold)).length
+      return results.filter((r) => Roller.matchRange(r, reducer.threshold))
+        .length
     }
     switch (reducer) {
       case 'average':

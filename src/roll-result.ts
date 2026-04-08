@@ -13,7 +13,10 @@ export interface CustomDieResult {
   faces: number[]
 }
 
-export function customDieResult(result: number, faces: number[]): CustomDieResult {
+export function customDieResult(
+  result: number,
+  faces: number[],
+): CustomDieResult {
   return {
     type: 'custom-die-result',
     result,

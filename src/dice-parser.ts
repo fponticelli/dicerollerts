@@ -192,13 +192,26 @@ const GTE = match('>=')
 const LTE = match('<=')
 const EQ = matchChar('=')
 
-const countThreshold: Decoder<TextInput, CountReducer, DecodeError> = COUNT.skipNext(WS).pickNext(
-  oneOf(
-    GTE.skipNext(OWS).pickNext(positive.map((v): CountReducer => ({ type: 'count', threshold: valueOrMore(v) }))),
-    LTE.skipNext(OWS).pickNext(positive.map((v): CountReducer => ({ type: 'count', threshold: valueOrLess(v) }))),
-    EQ.skipNext(OWS).pickNext(positive.map((v): CountReducer => ({ type: 'count', threshold: exact(v) }))),
-  ),
-)
+const countThreshold: Decoder<TextInput, CountReducer, DecodeError> =
+  COUNT.skipNext(WS).pickNext(
+    oneOf(
+      GTE.skipNext(OWS).pickNext(
+        positive.map(
+          (v): CountReducer => ({ type: 'count', threshold: valueOrMore(v) }),
+        ),
+      ),
+      LTE.skipNext(OWS).pickNext(
+        positive.map(
+          (v): CountReducer => ({ type: 'count', threshold: valueOrLess(v) }),
+        ),
+      ),
+      EQ.skipNext(OWS).pickNext(
+        positive.map(
+          (v): CountReducer => ({ type: 'count', threshold: exact(v) }),
+        ),
+      ),
+    ),
+  )
 
 const SUM = match('sum')
 const AVERAGE = oneOf(match('average'), match('avg'))
@@ -218,17 +231,26 @@ const negate = lazy(() =>
 ) // .mapError(_ => 'negate')
 const unary = negate
 
-const addSubSymbol: Decoder<TextInput, 'sum' | 'difference', DecodeError> = oneOf(
-  PLUS.withResult('sum' as const),
-  MINUS.withResult('difference' as const),
-)
+const addSubSymbol: Decoder<TextInput, 'sum' | 'difference', DecodeError> =
+  oneOf(
+    PLUS.withResult('sum' as const),
+    MINUS.withResult('difference' as const),
+  )
 
-const mulDivSymbol: Decoder<TextInput, 'multiplication' | 'division', DecodeError> = oneOf(
+const mulDivSymbol: Decoder<
+  TextInput,
+  'multiplication' | 'division',
+  DecodeError
+> = oneOf(
   MULTIPLICATION.withResult('multiplication' as const),
   DIVISION.withResult('division' as const),
 )
 
-const mulDivRight: Decoder<TextInput, { op: 'multiplication' | 'division'; right: DiceExpression }, DecodeError> = OWS.pickNext(
+const mulDivRight: Decoder<
+  TextInput,
+  { op: 'multiplication' | 'division'; right: DiceExpression },
+  DecodeError
+> = OWS.pickNext(
   mulDivSymbol.flatMap((op) => {
     return OWS.pickNext(termExpression.map((right) => ({ op, right })))
   }),
@@ -245,11 +267,15 @@ const mulDivExpr: Decoder<TextInput, DiceExpression, DecodeError> = lazy(() =>
   }),
 )
 
-const addSubFactor: Decoder<TextInput, DiceExpression, DecodeError> = lazy(
-  () => oneOf(mulDivExpr, termExpression),
+const addSubFactor: Decoder<TextInput, DiceExpression, DecodeError> = lazy(() =>
+  oneOf(mulDivExpr, termExpression),
 )
 
-const addSubRight: Decoder<TextInput, { op: 'sum' | 'difference'; right: DiceExpression }, DecodeError> = OWS.pickNext(
+const addSubRight: Decoder<
+  TextInput,
+  { op: 'sum' | 'difference'; right: DiceExpression },
+  DecodeError
+> = OWS.pickNext(
   addSubSymbol.flatMap((op) => {
     return OWS.pickNext(addSubFactor.map((right) => ({ op, right })))
   }),
@@ -377,12 +403,15 @@ const diceMapeable = lazy(
   },
 )
 
-const customDieFaces = D.skipNext(matchChar('{')).skipNext(OWS).pickNext(
-  whole.atLeastWithSeparator(
-    1,
-    OWS.skipNext(COMMA).skipNext(OWS).withFailure(new CustomError(',')),
-  ),
-).skipNext(OWS.skipNext(matchChar('}')))
+const customDieFaces = D.skipNext(matchChar('{'))
+  .skipNext(OWS)
+  .pickNext(
+    whole.atLeastWithSeparator(
+      1,
+      OWS.skipNext(COMMA).skipNext(OWS).withFailure(new CustomError(',')),
+    ),
+  )
+  .skipNext(OWS.skipNext(matchChar('}')))
 
 const customDieExpression = customDieFaces.map(makeCustomDie)
 
@@ -405,18 +434,20 @@ const fateDieExpression = oneOf(
 const diceCountShorthand = lazy(
   (): Decoder<TextInput, DiceReduce, DecodeError> => {
     return positive.flatMap((rolls) => {
-      return (die as Decoder<TextInput, number, DecodeError>).flatMap((sides) => {
-        return matchChar('c')
-          .skipNext(OWS)
-          .pickNext(positive)
-          .map((v) => {
-            const dice = Array.from({ length: rolls }, () => makeDie(sides))
-            return makeDiceReduce(
-              makeDiceExpressions(...dice),
-              { type: 'count' as const, threshold: valueOrMore(v) } as CountReducer,
-            )
-          })
-      })
+      return (die as Decoder<TextInput, number, DecodeError>).flatMap(
+        (sides) => {
+          return matchChar('c')
+            .skipNext(OWS)
+            .pickNext(positive)
+            .map((v) => {
+              const dice = Array.from({ length: rolls }, () => makeDie(sides))
+              return makeDiceReduce(makeDiceExpressions(...dice), {
+                type: 'count' as const,
+                threshold: valueOrMore(v),
+              } as CountReducer)
+            })
+        },
+      )
     })
   },
 )
@@ -484,7 +515,11 @@ export const DiceParser = {
       return String(f)
     })
     // DecodeFailure.input is TextInput with { input: string, index: number }
-    const failureInput = (result as any).input as { input: string; index: number }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const failureInput = (result as any).input as {
+      input: string
+      index: number
+    }
     const failureIndex = failureInput?.index ?? 0
     const errors = buildParseErrors(input, failureIndex, messages)
     return { success: false, errors }

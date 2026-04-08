@@ -1,6 +1,6 @@
 import { DiceParser } from '../src/dice-parser'
 import { RR } from '../src/roll-result-domain'
-import { maxRoller, minRoller } from './roller.spec'
+import { minRoller } from './roller.spec'
 
 describe('operator precedence', () => {
   const cases: { expr: string; expected: number }[] = [

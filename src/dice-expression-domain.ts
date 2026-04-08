@@ -401,7 +401,9 @@ export const DE = {
 
   checkFunctor(sides: number, df: DiceFunctor): ValidationMessage[] {
     if (
-      (df.type === 'explode' || df.type === 'reroll' || df.type === 'compound') &&
+      (df.type === 'explode' ||
+        df.type === 'reroll' ||
+        df.type === 'compound') &&
       DE.alwaysInRange(sides, df.range)
     ) {
       return [{ type: 'infinite-reroll', sides, range: df.range }]

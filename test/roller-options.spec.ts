@@ -1,4 +1,11 @@
-import { diceReduce, diceListWithMap, explode, reroll, always, exact } from '../src/dice-expression'
+import {
+  diceReduce,
+  diceListWithMap,
+  explode,
+  reroll,
+  always,
+  exact,
+} from '../src/dice-expression'
 import { Roller } from '../src/roller'
 import { RR } from '../src/roll-result-domain'
 

@@ -89,7 +89,13 @@ export function customDie(faces: number[]): CustomDie {
   }
 }
 
-export type DiceExpression = Die | Literal | DiceReduce | BinaryOp | UnaryOp | CustomDie
+export type DiceExpression =
+  | Die
+  | Literal
+  | DiceReduce
+  | BinaryOp
+  | UnaryOp
+  | CustomDie
 
 export type SimpleReducer = 'sum' | 'min' | 'max' | 'average' | 'median'
 

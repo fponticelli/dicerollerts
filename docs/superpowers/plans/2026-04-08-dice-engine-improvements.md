@@ -15,6 +15,7 @@
 ### Task 1: Fix Operator Precedence
 
 **Files:**
+
 - Create: `test/precedence.spec.ts`
 - Modify: `src/dice-parser.ts:213-239`
 - Modify: `test/parsing.spec.ts:62`
@@ -91,8 +92,8 @@ const mulDivExpr: Decoder<TextInput, DiceExpression, DecodeError> = lazy(() =>
   }),
 )
 
-const addSubFactor: Decoder<TextInput, DiceExpression, DecodeError> = lazy(
-  () => oneOf(mulDivExpr, termExpression),
+const addSubFactor: Decoder<TextInput, DiceExpression, DecodeError> = lazy(() =>
+  oneOf(mulDivExpr, termExpression),
 )
 
 const addSubRight = OWS.pickNext(
@@ -146,6 +147,7 @@ git commit -m "fix: correct operator precedence for mul/div same-tier associativ
 ### Task 2: Custom-Faced Dice & Fate Dice - Types and Roller
 
 **Files:**
+
 - Create: `test/custom-dice.spec.ts`
 - Modify: `src/dice-expression.ts`
 - Modify: `src/dice-expression-domain.ts`
@@ -267,7 +269,13 @@ export function customDie(faces: number[]): CustomDie {
 Update `DiceExpression` union (line 80):
 
 ```ts
-export type DiceExpression = Die | CustomDie | Literal | DiceReduce | BinaryOp | UnaryOp
+export type DiceExpression =
+  | Die
+  | CustomDie
+  | Literal
+  | DiceReduce
+  | BinaryOp
+  | UnaryOp
 ```
 
 Add `EmptyFaces` validation message after `DropOrKeepShouldBePositive`:
@@ -308,7 +316,10 @@ export interface CustomDieResult {
   faces: number[]
 }
 
-export function customDieResult(result: number, faces: number[]): CustomDieResult {
+export function customDieResult(
+  result: number,
+  faces: number[],
+): CustomDieResult {
   return {
     type: 'custom-die-result',
     result,
@@ -410,6 +421,7 @@ git commit -m "feat: add custom-faced dice type with Fate die support"
 ### Task 3: Custom Dice & Fate Dice - Parser
 
 **Files:**
+
 - Modify: `test/custom-dice.spec.ts`
 - Modify: `src/dice-parser.ts`
 
@@ -421,28 +433,26 @@ Append to `test/custom-dice.spec.ts`:
 import { DiceParser } from '../src/dice-parser'
 
 describe('custom die parsing', () => {
-  const cases: { input: string; rendered: string; min: number; max: number }[] = [
-    { input: 'd{1,2,3}', rendered: 'd{1,2,3}', min: 1, max: 3 },
-    { input: 'd{1,1,2,2,3,4}', rendered: 'd{1,1,2,2,3,4}', min: 1, max: 4 },
-    { input: 'd{ 1 , 2 , 3 }', rendered: 'd{1,2,3}', min: 1, max: 3 },
-    { input: 'dF', rendered: 'dF', min: -1, max: 1 },
-    { input: '4dF', rendered: '4dF', min: -4, max: 4 },
-    { input: 'dF + 3', rendered: 'dF + 3', min: 2, max: 4 },
-    { input: 'd{2,4,6} + 1', rendered: 'd{2,4,6} + 1', min: 3, max: 7 },
-  ]
+  const cases: { input: string; rendered: string; min: number; max: number }[] =
+    [
+      { input: 'd{1,2,3}', rendered: 'd{1,2,3}', min: 1, max: 3 },
+      { input: 'd{1,1,2,2,3,4}', rendered: 'd{1,1,2,2,3,4}', min: 1, max: 4 },
+      { input: 'd{ 1 , 2 , 3 }', rendered: 'd{1,2,3}', min: 1, max: 3 },
+      { input: 'dF', rendered: 'dF', min: -1, max: 1 },
+      { input: '4dF', rendered: '4dF', min: -4, max: 4 },
+      { input: 'dF + 3', rendered: 'dF + 3', min: 2, max: 4 },
+      { input: 'd{2,4,6} + 1', rendered: 'd{2,4,6} + 1', min: 3, max: 7 },
+    ]
 
-  test.each(cases)(
-    'parses $input',
-    ({ input, rendered, min, max }) => {
-      const parsed = DiceParser.parse(input)
-      expect(parsed.isSuccess()).toBe(true)
-      if (parsed.isSuccess()) {
-        expect(DE.toString(parsed.value)).toBe(rendered)
-        expect(RR.getResult(minRoller().roll(parsed.value))).toBe(min)
-        expect(RR.getResult(maxRoller().roll(parsed.value))).toBe(max)
-      }
-    },
-  )
+  test.each(cases)('parses $input', ({ input, rendered, min, max }) => {
+    const parsed = DiceParser.parse(input)
+    expect(parsed.isSuccess()).toBe(true)
+    if (parsed.isSuccess()) {
+      expect(DE.toString(parsed.value)).toBe(rendered)
+      expect(RR.getResult(minRoller().roll(parsed.value))).toBe(min)
+      expect(RR.getResult(maxRoller().roll(parsed.value))).toBe(max)
+    }
+  })
 
   test('rejects empty faces d{}', () => {
     const parsed = DiceParser.parse('d{}')
@@ -461,40 +471,51 @@ Expected: FAIL - parser doesn't recognize `d{...}` or `dF`
 In `src/dice-parser.ts`, add after the `die` definition (around line 193):
 
 ```ts
-const customDieFaces = D.skipNext(matchChar('{')).skipNext(OWS).pickNext(
-  whole.atLeastWithSeparator(1, OWS.skipNext(COMMA).skipNext(OWS)),
-).skipNext(OWS.skipNext(matchChar('}')))
+const customDieFaces = D.skipNext(matchChar('{'))
+  .skipNext(OWS)
+  .pickNext(whole.atLeastWithSeparator(1, OWS.skipNext(COMMA).skipNext(OWS)))
+  .skipNext(OWS.skipNext(matchChar('}')))
 
 const fateDie = oneOf(
   positive.flatMap((count) => {
-    return matchChar('d').skipNext(matchChar('F')).withResult(
-      Array.from({ length: count }, () => makeCustomDie([-1, 0, 1])) as DiceExpression[]
-    )
+    return matchChar('d')
+      .skipNext(matchChar('F'))
+      .withResult(
+        Array.from({ length: count }, () =>
+          makeCustomDie([-1, 0, 1]),
+        ) as DiceExpression[],
+      )
   }),
-  matchChar('d').skipNext(matchChar('F')).withResult(
-    [makeCustomDie([-1, 0, 1])] as DiceExpression[]
-  ),
+  matchChar('d')
+    .skipNext(matchChar('F'))
+    .withResult([makeCustomDie([-1, 0, 1])] as DiceExpression[]),
 )
 
-const customDieExpression: Decoder<TextInput, DiceExpression, DecodeError> = oneOf(
-  customDieFaces.map(makeCustomDie),
-)
+const customDieExpression: Decoder<TextInput, DiceExpression, DecodeError> =
+  oneOf(customDieFaces.map(makeCustomDie))
 
-const fateDieExpression: Decoder<TextInput, DiceExpression, DecodeError> = oneOf(
-  positive.flatMap((count) => {
-    return matchChar('d').skipNext(matchChar('F')).withResult(
-      count === 1
-        ? makeCustomDie([-1, 0, 1])
-        : makeDiceReduce(
-            makeDiceExpressions(
-              ...Array.from({ length: count }, () => makeCustomDie([-1, 0, 1])),
-            ),
-            'sum' as DiceReducer,
-          ),
-    )
-  }),
-  matchChar('d').skipNext(matchChar('F')).withResult(makeCustomDie([-1, 0, 1])),
-)
+const fateDieExpression: Decoder<TextInput, DiceExpression, DecodeError> =
+  oneOf(
+    positive.flatMap((count) => {
+      return matchChar('d')
+        .skipNext(matchChar('F'))
+        .withResult(
+          count === 1
+            ? makeCustomDie([-1, 0, 1])
+            : makeDiceReduce(
+                makeDiceExpressions(
+                  ...Array.from({ length: count }, () =>
+                    makeCustomDie([-1, 0, 1]),
+                  ),
+                ),
+                'sum' as DiceReducer,
+              ),
+        )
+    }),
+    matchChar('d')
+      .skipNext(matchChar('F'))
+      .withResult(makeCustomDie([-1, 0, 1])),
+  )
 ```
 
 Add `customDie as makeCustomDie` to the imports from `./dice-expression`.
@@ -535,6 +556,7 @@ git commit -m "feat: add parser support for custom dice d{...} and Fate dice dF"
 ### Task 4: Configurable Iteration Limits
 
 **Files:**
+
 - Create: `test/roller-options.spec.ts`
 - Modify: `src/roller.ts`
 - Modify: `src/index.ts`
@@ -544,7 +566,14 @@ git commit -m "feat: add parser support for custom dice d{...} and Fate dice dF"
 Create `test/roller-options.spec.ts`:
 
 ```ts
-import { diceReduce, diceListWithMap, explode, reroll, always, exact } from '../src/dice-expression'
+import {
+  diceReduce,
+  diceListWithMap,
+  explode,
+  reroll,
+  always,
+  exact,
+} from '../src/dice-expression'
 import { Roller } from '../src/roller'
 import { RR } from '../src/roll-result-domain'
 
@@ -673,6 +702,7 @@ git commit -m "feat: add configurable iteration limits to Roller"
 ### Task 5: Compound Exploding - Types and Roller
 
 **Files:**
+
 - Create: `test/compound.spec.ts`
 - Modify: `src/dice-expression.ts`
 - Modify: `src/dice-expression-domain.ts`
@@ -908,6 +938,7 @@ git commit -m "feat: add compound exploding dice type"
 ### Task 6: Compound Exploding - Parser
 
 **Files:**
+
 - Modify: `test/compound.spec.ts`
 - Modify: `src/dice-parser.ts`
 
@@ -919,12 +950,33 @@ Append to `test/compound.spec.ts`:
 import { DiceParser } from '../src/dice-parser'
 
 describe('compound parsing', () => {
-  const cases: { input: string; rendered: string; min: number; max: number }[] = [
-    { input: 'd6 compound once on 6', rendered: 'd6 compound once on 6', min: 1, max: 12 },
-    { input: '3d6 compound once on 6', rendered: '3d6 compound once on 6', min: 3, max: 36 },
-    { input: 'd6 compound on 7', rendered: 'd6 compound on 7', min: 1, max: 6 },
-    { input: '3d6ce6', rendered: '3d6 compound on 6 or more', min: 3, max: undefined },
-  ]
+  const cases: { input: string; rendered: string; min: number; max: number }[] =
+    [
+      {
+        input: 'd6 compound once on 6',
+        rendered: 'd6 compound once on 6',
+        min: 1,
+        max: 12,
+      },
+      {
+        input: '3d6 compound once on 6',
+        rendered: '3d6 compound once on 6',
+        min: 3,
+        max: 36,
+      },
+      {
+        input: 'd6 compound on 7',
+        rendered: 'd6 compound on 7',
+        min: 1,
+        max: 6,
+      },
+      {
+        input: '3d6ce6',
+        rendered: '3d6 compound on 6 or more',
+        min: 3,
+        max: undefined,
+      },
+    ]
 
   test.each(cases.filter((c) => c.max !== undefined))(
     'parses $input',
@@ -1001,6 +1053,7 @@ git commit -m "feat: add parser support for compound exploding"
 ### Task 7: Dice Pools / Success Counting - Types and Roller
 
 **Files:**
+
 - Create: `test/dice-pool.spec.ts`
 - Modify: `src/dice-expression.ts`
 - Modify: `src/dice-expression-domain.ts`
@@ -1220,6 +1273,7 @@ git commit -m "feat: add dice pool success counting reducer"
 ### Task 8: Dice Pools - Parser
 
 **Files:**
+
 - Modify: `test/dice-pool.spec.ts`
 - Modify: `src/dice-parser.ts`
 
@@ -1231,27 +1285,30 @@ Append to `test/dice-pool.spec.ts`:
 import { DiceParser } from '../src/dice-parser'
 
 describe('dice pool parsing', () => {
-  const cases: { input: string; rendered: string; min: number; max: number }[] = [
-    { input: '4d10 count >= 6', rendered: '4d10 count >= 6', min: 0, max: 4 },
-    { input: '8d10 count >= 6', rendered: '8d10 count >= 6', min: 0, max: 8 },
-    { input: '3d6 count = 6', rendered: '3d6 count = 6', min: 0, max: 3 },
-    { input: '3d6 count <= 2', rendered: '3d6 count <= 2', min: 3, max: 0 },
-    { input: '4d10c6', rendered: '4d10 count >= 6', min: 0, max: 4 },
-    { input: '(1,2,3) count >= 2', rendered: '(1,2,3) count >= 2', min: 2, max: 2 },
-  ]
+  const cases: { input: string; rendered: string; min: number; max: number }[] =
+    [
+      { input: '4d10 count >= 6', rendered: '4d10 count >= 6', min: 0, max: 4 },
+      { input: '8d10 count >= 6', rendered: '8d10 count >= 6', min: 0, max: 8 },
+      { input: '3d6 count = 6', rendered: '3d6 count = 6', min: 0, max: 3 },
+      { input: '3d6 count <= 2', rendered: '3d6 count <= 2', min: 3, max: 0 },
+      { input: '4d10c6', rendered: '4d10 count >= 6', min: 0, max: 4 },
+      {
+        input: '(1,2,3) count >= 2',
+        rendered: '(1,2,3) count >= 2',
+        min: 2,
+        max: 2,
+      },
+    ]
 
-  test.each(cases)(
-    'parses $input',
-    ({ input, rendered, min, max }) => {
-      const parsed = DiceParser.parse(input)
-      expect(parsed.isSuccess()).toBe(true)
-      if (parsed.isSuccess()) {
-        expect(DE.toString(parsed.value)).toBe(rendered)
-        expect(RR.getResult(minRoller().roll(parsed.value))).toBe(min)
-        expect(RR.getResult(maxRoller().roll(parsed.value))).toBe(max)
-      }
-    },
-  )
+  test.each(cases)('parses $input', ({ input, rendered, min, max }) => {
+    const parsed = DiceParser.parse(input)
+    expect(parsed.isSuccess()).toBe(true)
+    if (parsed.isSuccess()) {
+      expect(DE.toString(parsed.value)).toBe(rendered)
+      expect(RR.getResult(minRoller().roll(parsed.value))).toBe(min)
+      expect(RR.getResult(maxRoller().roll(parsed.value))).toBe(max)
+    }
+  })
 })
 ```
 
@@ -1272,13 +1329,26 @@ const GTE = match('>=')
 const LTE = match('<=')
 const EQ = matchChar('=')
 
-const countThreshold: Decoder<TextInput, CountReducer, DecodeError> = COUNT.skipNext(WS).pickNext(
-  oneOf(
-    GTE.skipNext(OWS).pickNext(positive.map((v) => ({ type: 'count' as const, threshold: valueOrMore(v) }))),
-    LTE.skipNext(OWS).pickNext(positive.map((v) => ({ type: 'count' as const, threshold: valueOrLess(v) }))),
-    EQ.skipNext(OWS).pickNext(positive.map((v) => ({ type: 'count' as const, threshold: exact(v) }))),
-  ),
-)
+const countThreshold: Decoder<TextInput, CountReducer, DecodeError> =
+  COUNT.skipNext(WS).pickNext(
+    oneOf(
+      GTE.skipNext(OWS).pickNext(
+        positive.map((v) => ({
+          type: 'count' as const,
+          threshold: valueOrMore(v),
+        })),
+      ),
+      LTE.skipNext(OWS).pickNext(
+        positive.map((v) => ({
+          type: 'count' as const,
+          threshold: valueOrLess(v),
+        })),
+      ),
+      EQ.skipNext(OWS).pickNext(
+        positive.map((v) => ({ type: 'count' as const, threshold: exact(v) })),
+      ),
+    ),
+  )
 ```
 
 Update the `diceReduce` function to also try count:
@@ -1322,10 +1392,10 @@ const diceCountShorthand = lazy(
             .pickNext(positive)
             .map((v) => {
               const dice = Array.from({ length: rolls }, () => makeDie(sides))
-              return makeDiceReduce(
-                makeDiceExpressions(...dice),
-                { type: 'count' as const, threshold: valueOrMore(v) },
-              )
+              return makeDiceReduce(makeDiceExpressions(...dice), {
+                type: 'count' as const,
+                threshold: valueOrMore(v),
+              })
             })
         })
       }),
@@ -1353,6 +1423,7 @@ git commit -m "feat: add parser support for dice pool count syntax"
 ### Task 9: Constant Folding
 
 **Files:**
+
 - Create: `test/simplify.spec.ts`
 - Modify: `src/dice-expression-domain.ts`
 
@@ -1440,7 +1511,11 @@ describe('constant folding / simplify', () => {
 
   test('recursively simplifies nested expressions', () => {
     // (2 + 3) + d6 -> 5 + d6
-    const expr = binaryOp('sum', binaryOp('sum', literal(2), literal(3)), die(6))
+    const expr = binaryOp(
+      'sum',
+      binaryOp('sum', literal(2), literal(3)),
+      die(6),
+    )
     expect(DE.simplify(expr)).toEqual(binaryOp('sum', literal(5), die(6)))
   })
 
@@ -1528,6 +1603,7 @@ git commit -m "feat: add constant folding via DE.simplify()"
 ### Task 10: Parser Error Messages
 
 **Files:**
+
 - Create: `src/parse-error.ts`
 - Create: `test/parse-errors.spec.ts`
 - Modify: `src/dice-parser.ts`
@@ -1801,6 +1877,7 @@ git commit -m "feat: add parseWithErrors with contextual messages and suggestion
 ### Task 11: Probability Analysis - Exact Distribution
 
 **Files:**
+
 - Create: `src/dice-stats.ts`
 - Create: `test/stats.spec.ts`
 - Modify: `src/index.ts`
@@ -1810,7 +1887,14 @@ git commit -m "feat: add parseWithErrors with contextual messages and suggestion
 Create `test/stats.spec.ts`:
 
 ```ts
-import { die, literal, binaryOp, diceReduce, diceExpressions, customDie } from '../src/dice-expression'
+import {
+  die,
+  literal,
+  binaryOp,
+  diceReduce,
+  diceExpressions,
+  customDie,
+} from '../src/dice-expression'
 import { DiceStats } from '../src/dice-stats'
 
 describe('exact probability analysis', () => {
@@ -1829,9 +1913,7 @@ describe('exact probability analysis', () => {
   })
 
   test('d6 + d6 distribution', () => {
-    const dist = DiceStats.distribution(
-      binaryOp('sum', die(6), die(6)),
-    )
+    const dist = DiceStats.distribution(binaryOp('sum', die(6), die(6)))
     expect(dist.size).toBe(11) // 2 through 12
     expect(dist.get(7)).toBeCloseTo(6 / 36) // most likely
     expect(dist.get(2)).toBeCloseTo(1 / 36)
@@ -1870,7 +1952,11 @@ describe('exact probability analysis', () => {
   })
 
   test('negate distribution', () => {
-    const dist = DiceStats.distribution({ type: 'unary-op', op: 'negate', expr: die(6) })
+    const dist = DiceStats.distribution({
+      type: 'unary-op',
+      op: 'negate',
+      expr: die(6),
+    })
     expect(dist.size).toBe(6)
     expect(dist.get(-1)).toBeCloseTo(1 / 6)
     expect(dist.get(-6)).toBeCloseTo(1 / 6)
@@ -1893,10 +1979,7 @@ describe('exact probability analysis', () => {
   })
 
   test('3d6 sum distribution has correct mean', () => {
-    const expr = diceReduce(
-      diceExpressions(die(6), die(6), die(6)),
-      'sum',
-    )
+    const expr = diceReduce(diceExpressions(die(6), die(6), die(6)), 'sum')
     expect(DiceStats.mean(expr)).toBeCloseTo(10.5)
   })
 
@@ -2150,9 +2233,7 @@ function computeFilteredDistribution(
         case 'median': {
           const mid = Math.floor(kept.length / 2)
           reduced =
-            kept.length % 2 === 0
-              ? (kept[mid] + kept[mid - 1]) / 2
-              : kept[mid]
+            kept.length % 2 === 0 ? (kept[mid] + kept[mid - 1]) / 2 : kept[mid]
           break
         }
       }
@@ -2281,6 +2362,7 @@ git commit -m "feat: add exact probability distribution analysis"
 ### Task 12: Probability Analysis - Monte Carlo & Summary
 
 **Files:**
+
 - Modify: `test/stats.spec.ts`
 - Modify: `src/dice-stats.ts`
 
@@ -2480,6 +2562,7 @@ git commit -m "feat: add Monte Carlo simulation and summary to DiceStats"
 ### Task 13: Final Integration & Verification
 
 **Files:**
+
 - All source and test files
 
 - [ ] **Step 1: Run full test suite**

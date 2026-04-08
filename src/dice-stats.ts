@@ -1,4 +1,9 @@
-import type { DiceExpression, DiceReduceable, DiceReducer, DiceBinOp, Range } from './dice-expression'
+import type {
+  DiceExpression,
+  DiceReduceable,
+  DiceReducer,
+  DiceBinOp,
+} from './dice-expression'
 import { Roller } from './roller'
 import { RR } from './roll-result-domain'
 
@@ -49,14 +54,22 @@ function distributionOf(expr: DiceExpression): Distribution {
 
 function applyBinOp(op: DiceBinOp, a: number, b: number): number {
   switch (op) {
-    case 'sum': return a + b
-    case 'difference': return a - b
-    case 'multiplication': return a * b
-    case 'division': return b === 0 ? 0 : Math.trunc(a / b)
+    case 'sum':
+      return a + b
+    case 'difference':
+      return a - b
+    case 'multiplication':
+      return a * b
+    case 'division':
+      return b === 0 ? 0 : Math.trunc(a / b)
   }
 }
 
-function combineBinary(left: Distribution, right: Distribution, op: DiceBinOp): Distribution {
+function combineBinary(
+  left: Distribution,
+  right: Distribution,
+  op: DiceBinOp,
+): Distribution {
   const dist: Distribution = new Map()
   for (const [lv, lp] of left) {
     for (const [rv, rp] of right) {
@@ -68,7 +81,10 @@ function combineBinary(left: Distribution, right: Distribution, op: DiceBinOp): 
   return dist
 }
 
-function distributeReduceable(reduceable: DiceReduceable, reducer: DiceReducer): Distribution {
+function distributeReduceable(
+  reduceable: DiceReduceable,
+  reducer: DiceReducer,
+): Distribution {
   switch (reduceable.type) {
     case 'dice-expressions': {
       const subDists = reduceable.exprs.map(distributionOf)
@@ -78,7 +94,9 @@ function distributeReduceable(reduceable: DiceReduceable, reducer: DiceReducer):
       // Enumerate all combinations from the filterable list
       let subDists: Distribution[]
       if (reduceable.list.type === 'filterable-dice-array') {
-        subDists = reduceable.list.dice.map(sides => distributionOf({ type: 'die', sides }))
+        subDists = reduceable.list.dice.map((sides) =>
+          distributionOf({ type: 'die', sides }),
+        )
       } else {
         subDists = reduceable.list.exprs.map(distributionOf)
       }
@@ -114,7 +132,10 @@ function distributeReduceable(reduceable: DiceReduceable, reducer: DiceReducer):
   }
 }
 
-function reduceDistributions(dists: Distribution[], reducer: DiceReducer): Distribution {
+function reduceDistributions(
+  dists: Distribution[],
+  reducer: DiceReducer,
+): Distribution {
   if (typeof reducer === 'string' && reducer === 'sum') {
     // Convolution for sum - more efficient
     let result: Distribution = new Map([[0, 1]])
@@ -154,7 +175,7 @@ function enumerateCombinations(dists: Distribution[]): Combination[] {
 
 function reduceValues(values: number[], reducer: DiceReducer): number {
   if (typeof reducer === 'object') {
-    return values.filter(r => Roller.matchRange(r, reducer.threshold)).length
+    return values.filter((r) => Roller.matchRange(r, reducer.threshold)).length
   }
   switch (reducer) {
     case 'sum':
@@ -164,7 +185,9 @@ function reduceValues(values: number[], reducer: DiceReducer): number {
     case 'max':
       return values.length === 0 ? 0 : Math.max(...values)
     case 'average':
-      return values.length === 0 ? 0 : Math.round(values.reduce((a, b) => a + b, 0) / values.length)
+      return values.length === 0
+        ? 0
+        : Math.round(values.reduce((a, b) => a + b, 0) / values.length)
     case 'median': {
       if (values.length === 0) return 0
       const sorted = [...values].sort((a, b) => a - b)
@@ -269,7 +292,10 @@ export const DiceStats = {
     return percentileFromDist(distributionOf(expr), p)
   },
 
-  monteCarlo(expr: DiceExpression, options?: MonteCarloOptions): MonteCarloResult {
+  monteCarlo(
+    expr: DiceExpression,
+    options?: MonteCarloOptions,
+  ): MonteCarloResult {
     const trials = options?.trials ?? 10000
     const roller = new Roller((max) => Math.floor(Math.random() * max) + 1)
     const results: number[] = []
@@ -287,7 +313,8 @@ export const DiceStats = {
     }
 
     const mean = results.reduce((a, b) => a + b, 0) / results.length
-    const variance = results.reduce((a, b) => a + (b - mean) ** 2, 0) / results.length
+    const variance =
+      results.reduce((a, b) => a + (b - mean) ** 2, 0) / results.length
     const sorted = results.slice().sort((a, b) => a - b)
 
     return {

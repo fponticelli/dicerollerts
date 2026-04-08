@@ -75,7 +75,11 @@ describe('constant folding / simplify', () => {
   })
 
   test('recursively simplifies nested expressions', () => {
-    const expr = binaryOp('sum', binaryOp('sum', literal(2), literal(3)), die(6))
+    const expr = binaryOp(
+      'sum',
+      binaryOp('sum', literal(2), literal(3)),
+      die(6),
+    )
     expect(DE.simplify(expr)).toEqual(binaryOp('sum', literal(5), die(6)))
   })
 

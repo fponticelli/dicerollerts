@@ -1,5 +1,4 @@
 import { DiceParser } from '../src/dice-parser'
-import type { ParseError } from '../src/parse-error'
 
 describe('parser error messages', () => {
   test('parseWithErrors returns success for valid input', () => {

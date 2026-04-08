@@ -10,24 +10,47 @@ export type ParseWithErrorsResult<T> =
   | { success: false; errors: ParseError[] }
 
 const KEYWORDS = [
-  'explode', 'reroll', 'compound', 'drop', 'keep',
-  'lowest', 'highest', 'average', 'median', 'minimum',
-  'maximum', 'emphasis', 'furthest', 'count', 'sum',
-  'once', 'twice', 'always', 'on', 'or', 'more',
-  'less', 'high', 'low', 'times',
+  'explode',
+  'reroll',
+  'compound',
+  'drop',
+  'keep',
+  'lowest',
+  'highest',
+  'average',
+  'median',
+  'minimum',
+  'maximum',
+  'emphasis',
+  'furthest',
+  'count',
+  'sum',
+  'once',
+  'twice',
+  'always',
+  'on',
+  'or',
+  'more',
+  'less',
+  'high',
+  'low',
+  'times',
 ]
 
 function levenshtein(a: string, b: string): number {
   const m = a.length
   const n = b.length
-  const dp: number[][] = Array.from({ length: m + 1 }, () => Array(n + 1).fill(0))
+  const dp: number[][] = Array.from({ length: m + 1 }, () =>
+    Array(n + 1).fill(0),
+  )
   for (let i = 0; i <= m; i++) dp[i][0] = i
   for (let j = 0; j <= n; j++) dp[0][j] = j
   for (let i = 1; i <= m; i++) {
     for (let j = 1; j <= n; j++) {
-      dp[i][j] = a[i - 1] === b[j - 1]
-        ? dp[i - 1][j - 1]
-        : 1 + Math.min(dp[i - 1][j], dp[i][j - 1], dp[i - 1][j - 1])
+      dp[i][j] =
+        a[i - 1] === b[j - 1]
+          ? dp[i - 1][j - 1]
+          : 1 + Math.min(dp[i - 1][j], dp[i][j - 1], dp[i - 1][j - 1])
     }
   }
   return dp[m][n]
@@ -72,7 +95,9 @@ export function buildParseErrors(
   }
 
   // Check for "explode/reroll/compound <number>" without "on"
-  const explodeWithoutOn = input.match(/\b(explode|reroll|compound)\s+(\d+)\s*$/)
+  const explodeWithoutOn = input.match(
+    /\b(explode|reroll|compound)\s+(\d+)\s*$/,
+  )
   if (explodeWithoutOn) {
     errors.push({
       message: `Expected 'on' keyword after '${explodeWithoutOn[1]}'`,
@@ -83,9 +108,10 @@ export function buildParseErrors(
     return errors
   }
 
-  const message = rawMessages.length > 0
-    ? rawMessages.join('; ')
-    : `Unexpected input at position ${position}`
+  const message =
+    rawMessages.length > 0
+      ? rawMessages.join('; ')
+      : `Unexpected input at position ${position}`
 
   errors.push({
     message,
