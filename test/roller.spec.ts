@@ -7,12 +7,15 @@ import {
   diceReduce,
   die,
   drop,
+  keep,
   explode,
   literal,
   reroll,
+  emphasis,
   unaryOp,
   upTo,
   valueOrMore,
+  filterableDiceArray,
   filterableDiceExpressions,
 } from '../src/dice-expression'
 import {
@@ -274,5 +277,67 @@ describe('dice roller', () => {
       expect(minRoller().roll(test)).toEqual(min)
       expect(maxRoller().roll(test)).toEqual(max)
     }
+  })
+})
+
+import { RR } from '../src/roll-result-domain'
+
+describe('emphasis roller', () => {
+  test('emphasis high tie breaker picks higher value on tie distance', () => {
+    // With a d6, average = floor(6/2) = 3. Rolls 1 and 5 are equidistant (distance 2).
+    // 'high' tiebreaker should pick 5.
+    const rolls = [1, 5]
+    let callIdx = 0
+    const roller = new Roller(() => {
+      return rolls[callIdx++] ?? 1
+    })
+    const expr = diceReduce(
+      diceListWithMap([6], emphasis('high', 'average')),
+      'sum',
+    )
+    const result = RR.getResult(roller.roll(expr))
+    expect(result).toBe(5)
+  })
+
+  test('emphasis low tie breaker picks lower value on tie distance', () => {
+    // With a d6, average = floor(6/2) = 3. Rolls 1 and 5 are equidistant (distance 2).
+    // 'low' tiebreaker should pick 1.
+    const rolls = [1, 5]
+    let callIdx = 0
+    const roller = new Roller(() => {
+      return rolls[callIdx++] ?? 1
+    })
+    const expr = diceReduce(
+      diceListWithMap([6], emphasis('low', 'average')),
+      'sum',
+    )
+    const result = RR.getResult(roller.roll(expr))
+    expect(result).toBe(1)
+  })
+})
+
+describe('filter roller - drop high and keep low', () => {
+  test('3d6 drop highest 1', () => {
+    const expr = diceReduce(
+      diceListWithFilter(filterableDiceArray([6, 6, 6]), drop('high', 1)),
+      'sum',
+    )
+    const result = RR.getResult(maxRoller().roll(expr))
+    // All roll 6, drop one 6, keep two 6s = 12
+    expect(result).toBe(12)
+    const minResult = RR.getResult(minRoller().roll(expr))
+    // All roll 1, drop one 1, keep two 1s = 2
+    expect(minResult).toBe(2)
+  })
+
+  test('3d6 keep lowest 1', () => {
+    const expr = diceReduce(
+      diceListWithFilter(filterableDiceArray([6, 6, 6]), keep('low', 1)),
+      'sum',
+    )
+    const result = RR.getResult(minRoller().roll(expr))
+    expect(result).toBe(1)
+    const maxResult = RR.getResult(maxRoller().roll(expr))
+    expect(maxResult).toBe(6)
   })
 })

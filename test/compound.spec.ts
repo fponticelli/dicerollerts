@@ -74,6 +74,20 @@ describe('compound exploding', () => {
   })
 })
 
+test('compound where range never matches returns normal result', () => {
+  const expr = diceReduce(
+    diceListWithMap([6], compound(upTo(1), exact(99))),
+    'sum',
+  )
+  const result = minRoller().roll(expr)
+  if (
+    result.type === 'dice-reduce-result' &&
+    result.reduceables.type === 'dice-mapeable-result'
+  ) {
+    expect(result.reduceables.rolls[0].type).toBe('normal')
+  }
+})
+
 import { DiceParser } from '../src/dice-parser'
 
 describe('compound parsing', () => {
