@@ -36,6 +36,7 @@ import {
   customDie as makeCustomDie,
 } from './dice-expression'
 import { CustomError, type DecodeError } from 'partsing/error'
+import { buildParseErrors, type ParseWithErrorsResult } from './parse-error'
 import { type Decoder } from 'partsing/core/decoder'
 import { type DecodeResult } from 'partsing/core/result'
 import { matchChar, regexp, match, matchAnyCharOf, eoi } from 'partsing/text'
@@ -469,5 +470,23 @@ export const DiceParser = {
     } else {
       return null
     }
+  },
+  parseWithErrors(input: string): ParseWithErrorsResult<DiceExpression> {
+    const result = decode(input)
+    if (result.isSuccess()) {
+      return { success: true, value: result.value }
+    }
+    const failures = result.getUnsafeFailures()
+    const messages = failures.map((f) => {
+      if (f instanceof CustomError) {
+        return f.message
+      }
+      return String(f)
+    })
+    // DecodeFailure.input is TextInput with { input: string, index: number }
+    const failureInput = (result as any).input as { input: string; index: number }
+    const failureIndex = failureInput?.index ?? 0
+    const errors = buildParseErrors(input, failureIndex, messages)
+    return { success: false, errors }
   },
 }

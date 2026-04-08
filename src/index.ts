@@ -82,6 +82,8 @@ export type {
 } from './dice-expression'
 
 export { DiceParser } from './dice-parser'
+export type { ParseError, ParseWithErrorsResult } from './parse-error'
+export { suggestKeyword } from './parse-error'
 
 export { RR } from './roll-result-domain'
 
