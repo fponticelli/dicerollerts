@@ -117,6 +117,26 @@ describe('evaluator - dice expressions', () => {
   })
 })
 
+describe('evaluator - repeat limits', () => {
+  test('repeat limit exceeded throws', () => {
+    const result = ProgramParser.parse('repeat 100000 { 1 }')
+    if (!result.success) throw new Error('Parse failed')
+    const evaluator = new Evaluator(() => 1)
+    expect(() => evaluator.run(result.program)).toThrow(/exceeds maximum/)
+  })
+
+  test('repeat negative count throws', () => {
+    expect(() => run('repeat -1 { 1 }')).toThrow()
+  })
+
+  test('custom repeat limit', () => {
+    const result = ProgramParser.parse('repeat 5 { 1 }')
+    if (!result.success) throw new Error('Parse failed')
+    const evaluator = new Evaluator(() => 1, { maxRepeatIterations: 3 })
+    expect(() => evaluator.run(result.program)).toThrow()
+  })
+})
+
 describe('evaluator - full programs', () => {
   test('attack roll', () => {
     const result = run(

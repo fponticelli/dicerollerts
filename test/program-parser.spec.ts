@@ -328,6 +328,56 @@ describe('program parser - repeat', () => {
   })
 })
 
+describe('program parser - multi-line if', () => {
+  test('multi-line if/then/else', () => {
+    const input = `if true\n  then 1\n  else 0`
+    const result = ProgramParser.parse(input)
+    expect(result.success).toBe(true)
+  })
+})
+
+describe('program parser - reserved words', () => {
+  test('reserved word as record key fails', () => {
+    const result = ProgramParser.parse('{ if: 1 }')
+    expect(result.success).toBe(false)
+  })
+})
+
+describe('program parser - string escapes', () => {
+  test('string escape sequences', () => {
+    const result = ProgramParser.parse('"hello\\nworld"')
+    expect(result.success).toBe(true)
+    if (result.success) {
+      const stmt = result.program.statements[0]
+      if (
+        stmt.type === 'expression-statement' &&
+        stmt.expr.type === 'string-literal'
+      )
+        expect(stmt.expr.value).toBe('hello\nworld')
+    }
+  })
+
+  test('string with escaped quote', () => {
+    const result = ProgramParser.parse('"say \\"hi\\""')
+    expect(result.success).toBe(true)
+    if (result.success) {
+      const stmt = result.program.statements[0]
+      if (
+        stmt.type === 'expression-statement' &&
+        stmt.expr.type === 'string-literal'
+      )
+        expect(stmt.expr.value).toBe('say "hi"')
+    }
+  })
+})
+
+describe('program parser - dice variable collision', () => {
+  test('dice variable used twice', () => {
+    const result = ProgramParser.parse('`$mod + $mod`')
+    expect(result.success).toBe(true)
+  })
+})
+
 describe('program parser - full programs', () => {
   test('attack roll program', () => {
     const input = `$str_mod = 5

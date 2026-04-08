@@ -37,11 +37,17 @@ class Environment {
   }
 }
 
+export interface EvaluatorOptions {
+  maxRepeatIterations?: number
+}
+
 export class Evaluator {
   private readonly rollFn: Roll
+  private readonly maxRepeat: number
 
-  constructor(rollFn: Roll) {
+  constructor(rollFn: Roll, options?: EvaluatorOptions) {
     this.rollFn = rollFn
+    this.maxRepeat = options?.maxRepeatIterations ?? 10000
   }
 
   run(prog: Program): Value {
@@ -140,8 +146,6 @@ export class Evaluator {
             return this.isTruthy(left) && this.isTruthy(right)
           case 'or':
             return this.isTruthy(left) || this.isTruthy(right)
-          case 'concat':
-            return String(left) + String(right)
         }
         break
       }
@@ -169,6 +173,14 @@ export class Evaluator {
       case 'repeat-expr': {
         const countVal = this.evalExpr(expr.count, env)
         const count = this.toNumber(countVal)
+        if (count > this.maxRepeat) {
+          throw new Error(
+            `Repeat count ${count} exceeds maximum of ${this.maxRepeat}`,
+          )
+        }
+        if (count < 0) {
+          throw new Error('Repeat count must be non-negative')
+        }
         const results: Value[] = []
         for (let i = 0; i < count; i++) {
           const childEnv = env.child()

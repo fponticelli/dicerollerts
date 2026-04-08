@@ -54,6 +54,18 @@ export const ProgramParser = {
   },
 }
 
+const RESERVED = new Set([
+  'if',
+  'then',
+  'else',
+  'true',
+  'false',
+  'and',
+  'or',
+  'not',
+  'repeat',
+])
+
 class Parser {
   pos = 0
   constructor(private readonly input: string) {}
@@ -324,7 +336,7 @@ class Parser {
     // Replace variables with placeholders
     let substituted = source
     for (const v of vars) {
-      substituted = substituted.replace('$' + v.name, String(v.placeholder))
+      substituted = substituted.replaceAll('$' + v.name, String(v.placeholder))
     }
 
     const parsed = DiceParser.parseOrNull(substituted)
@@ -394,6 +406,11 @@ class Parser {
       }
     }
     const key = this.parseIdentifier()
+    if (RESERVED.has(key)) {
+      throw new Error(
+        `'${key}' is a reserved word and cannot be used as a record key at position ${this.pos}`,
+      )
+    }
     this.skipSpaces()
     this.expect(':')
     this.skipSpaces()
@@ -402,19 +419,19 @@ class Parser {
   }
 
   parseIf(): Expression {
-    this.skipSpaces()
+    this.skipWhitespaceAndComments()
     const condition = this.parseExpression()
-    this.skipSpaces()
+    this.skipWhitespaceAndComments()
     if (!this.matchKeyword('then')) {
       throw new Error(`Expected 'then' at position ${this.pos}`)
     }
-    this.skipSpaces()
+    this.skipWhitespaceAndComments()
     const thenExpr = this.parseExpression()
-    this.skipSpaces()
+    this.skipWhitespaceAndComments()
     if (!this.matchKeyword('else')) {
       throw new Error(`Expected 'else' at position ${this.pos}`)
     }
-    this.skipSpaces()
+    this.skipWhitespaceAndComments()
     const elseExpr = this.parseExpression()
     return ifExpr(condition, thenExpr, elseExpr)
   }
@@ -444,11 +461,14 @@ class Parser {
   parseVariableName(): string {
     this.expect('$')
     const start = this.pos
-    while (
-      this.pos < this.input.length &&
-      /[a-z0-9_]/.test(this.input[this.pos])
-    ) {
+    if (this.pos < this.input.length && /[a-z_]/.test(this.input[this.pos])) {
       this.pos++
+      while (
+        this.pos < this.input.length &&
+        /[a-z0-9_]/.test(this.input[this.pos])
+      ) {
+        this.pos++
+      }
     }
     if (this.pos === start) {
       throw new Error(`Expected variable name at position ${this.pos}`)
@@ -479,39 +499,42 @@ class Parser {
     ) {
       this.pos++
     }
-    // Handle decimals
-    if (
-      this.pos < this.input.length &&
-      this.input[this.pos] === '.' &&
-      this.pos + 1 < this.input.length &&
-      this.input[this.pos + 1] >= '0' &&
-      this.input[this.pos + 1] <= '9'
-    ) {
-      this.pos++ // skip .
-      while (
-        this.pos < this.input.length &&
-        this.input[this.pos] >= '0' &&
-        this.input[this.pos] <= '9'
-      ) {
-        this.pos++
-      }
-    }
-    return Number(this.input.substring(start, this.pos))
+    return parseInt(this.input.substring(start, this.pos), 10)
   }
 
   parseStringExpr(): Expression {
     this.pos++ // skip opening "
-    const start = this.pos
+    let value = ''
     while (this.pos < this.input.length && this.input[this.pos] !== '"') {
       if (this.input[this.pos] === '\\') {
-        this.pos++ // skip escape char
+        this.pos++ // skip backslash
+        const ch = this.input[this.pos]
+        switch (ch) {
+          case 'n':
+            value += '\n'
+            break
+          case 't':
+            value += '\t'
+            break
+          case '"':
+            value += '"'
+            break
+          case '\\':
+            value += '\\'
+            break
+          default:
+            value += ch
+            break
+        }
+        this.pos++
+      } else {
+        value += this.input[this.pos]
+        this.pos++
       }
-      this.pos++
     }
     if (this.pos >= this.input.length) {
       throw new Error('Unterminated string literal')
     }
-    const value = this.input.substring(start, this.pos)
     this.pos++ // skip closing "
     return stringLiteral(value)
   }
@@ -603,14 +626,6 @@ class Parser {
       }
       break
     }
-  }
-
-  peek(): string {
-    return this.pos < this.input.length ? this.input[this.pos] : ''
-  }
-
-  advance(): void {
-    this.pos++
   }
 
   expect(ch: string): void {

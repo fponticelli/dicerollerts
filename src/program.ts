@@ -104,7 +104,6 @@ export type BinaryOper =
   | 'lte'
   | 'and'
   | 'or'
-  | 'concat'
 
 export interface BinaryExpr {
   type: 'binary-expr'
