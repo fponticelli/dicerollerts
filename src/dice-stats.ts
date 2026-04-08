@@ -52,6 +52,11 @@ function distributionOf(expr: DiceExpression): Distribution {
     case 'dice-reduce': {
       return distributeReduceable(expr.reduceable, expr.reducer)
     }
+    case 'dice-variable-ref': {
+      throw new Error(
+        `Cannot compute distribution for variable reference: $${expr.name}`,
+      )
+    }
   }
 }
 

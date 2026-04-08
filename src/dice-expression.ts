@@ -89,6 +89,18 @@ export function customDie(faces: number[]): CustomDie {
   }
 }
 
+export interface DiceVariableRef {
+  type: 'dice-variable-ref'
+  name: string
+}
+
+export function diceVariableRef(name: string): DiceVariableRef {
+  return {
+    type: 'dice-variable-ref',
+    name,
+  }
+}
+
 export type DiceExpression =
   | Die
   | Literal
@@ -96,6 +108,7 @@ export type DiceExpression =
   | BinaryOp
   | UnaryOp
   | CustomDie
+  | DiceVariableRef
 
 export type SimpleReducer = 'sum' | 'min' | 'max' | 'average' | 'median'
 

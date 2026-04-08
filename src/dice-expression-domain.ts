@@ -101,6 +101,8 @@ export const DE = {
       return `${DE.toString(expr.left)} ${binOpToString(expr.op)} ${DE.toString(expr.right)}`
     } else if (expr.type === 'unary-op') {
       return `${unaryOpToString(expr.op)}${DE.toString(expr.expr)}`
+    } else if (expr.type === 'dice-variable-ref') {
+      return `$${expr.name}`
     } else {
       throw new Error(`Unknown expression type: ${String(expr)}`)
     }
@@ -323,6 +325,8 @@ export const DE = {
         return DE.calculateBasicRolls(expr.expr)
       case 'dice-reduce':
         return DE.calculateBasicRollsReduceable(expr.reduceable)
+      case 'dice-variable-ref':
+        return 0
     }
   },
 
@@ -348,6 +352,8 @@ export const DE = {
         return DE.validateExpr(expr.expr)
       case 'dice-reduce':
         return DE.validateDiceReduceable(expr.reduceable)
+      case 'dice-variable-ref':
+        return []
     }
   },
 
@@ -462,6 +468,8 @@ export const DE = {
         return binaryOp(expr.op, left, right)
       }
       case 'dice-reduce':
+        return expr
+      case 'dice-variable-ref':
         return expr
     }
   },

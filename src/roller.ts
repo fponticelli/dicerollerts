@@ -158,6 +158,7 @@ export class Roller {
   constructor(
     private readonly dieRoll: Roll,
     options?: Partial<RollerOptions>,
+    private readonly variables?: Record<string, number>,
   ) {
     this.options = { ...DEFAULT_OPTIONS, ...options }
   }
@@ -270,6 +271,12 @@ export class Roller {
       } else {
         throw new Error(`Invalid unary operation ${JSON.stringify(expr)}`)
       }
+    } else if (expr.type === 'dice-variable-ref') {
+      const value = this.variables?.[expr.name]
+      if (value === undefined) {
+        throw new Error(`Undefined variable: $${expr.name}`)
+      }
+      return literalResult(value, value)
     } else {
       throw new Error(`Invalid expressions ${JSON.stringify(expr)}`)
     }

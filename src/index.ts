@@ -35,6 +35,7 @@ export {
   upTo,
   valueOrLess,
   valueOrMore,
+  diceVariableRef,
 } from './dice-expression'
 
 export type {
@@ -79,6 +80,7 @@ export type {
   UpTo,
   ValueOrLess,
   ValueOrMore,
+  DiceVariableRef,
 } from './dice-expression'
 
 export { DiceParser } from './dice-parser'
