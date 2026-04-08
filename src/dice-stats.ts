@@ -4,6 +4,7 @@ import type {
   DiceReducer,
   DiceBinOp,
 } from './dice-expression'
+import { DE } from './dice-expression-domain'
 import { Roller } from './roller'
 import { RR } from './roll-result-domain'
 
@@ -127,7 +128,7 @@ function distributeReduceable(
       return dist
     }
     case 'dice-list-with-map': {
-      throw 'exact-not-supported'
+      throw new Error('exact-not-supported')
     }
   }
 }
@@ -331,34 +332,38 @@ export const DiceStats = {
   },
 
   summary(expr: DiceExpression): SummaryResult {
-    try {
-      const dist = DiceStats.distribution(expr)
-      return {
-        min: Math.min(...dist.keys()),
-        max: Math.max(...dist.keys()),
-        mean: meanFromDist(dist),
-        stddev: stddevFromDist(dist),
-        distribution: dist,
-        percentiles: {
-          25: percentileFromDist(dist, 25),
-          50: percentileFromDist(dist, 50),
-          75: percentileFromDist(dist, 75),
-        },
+    const complexity = DE.calculateBasicRolls(expr)
+    if (complexity <= 20) {
+      try {
+        const dist = DiceStats.distribution(expr)
+        return {
+          min: Math.min(...dist.keys()),
+          max: Math.max(...dist.keys()),
+          mean: meanFromDist(dist),
+          stddev: stddevFromDist(dist),
+          distribution: dist,
+          percentiles: {
+            25: percentileFromDist(dist, 25),
+            50: percentileFromDist(dist, 50),
+            75: percentileFromDist(dist, 75),
+          },
+        }
+      } catch {
+        // fall through to Monte Carlo
       }
-    } catch {
-      const mc = DiceStats.monteCarlo(expr, { trials: 50000 })
-      return {
-        min: mc.min,
-        max: mc.max,
-        mean: mc.mean,
-        stddev: mc.stddev,
-        distribution: mc.distribution,
-        percentiles: {
-          25: mc.percentile(25),
-          50: mc.percentile(50),
-          75: mc.percentile(75),
-        },
-      }
+    }
+    const mc = DiceStats.monteCarlo(expr, { trials: 50000 })
+    return {
+      min: mc.min,
+      max: mc.max,
+      mean: mc.mean,
+      stddev: mc.stddev,
+      distribution: mc.distribution,
+      percentiles: {
+        25: mc.percentile(25),
+        50: mc.percentile(50),
+        75: mc.percentile(75),
+      },
     }
   },
 }

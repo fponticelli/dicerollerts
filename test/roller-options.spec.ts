@@ -5,6 +5,7 @@ import {
   reroll,
   always,
   exact,
+  emphasis,
 } from '../src/dice-expression'
 import { Roller } from '../src/roller'
 import { RR } from '../src/roll-result-domain'
@@ -44,7 +45,15 @@ describe('configurable iteration limits', () => {
   })
 
   test('maxEmphasisIterations limits emphasis reroll ties', () => {
-    const roller = new Roller((max) => max, { maxEmphasisIterations: 5 })
-    expect(roller).toBeInstanceOf(Roller)
+    // Roller always returns 3, so both emphasis rolls are always equal (tie)
+    // With 'reroll' tiebreaker, it will keep retrying up to the limit
+    const roller = new Roller(() => 3, { maxEmphasisIterations: 5 })
+    const expr = diceReduce(
+      diceListWithMap([6], emphasis('reroll', 'average')),
+      'sum',
+    )
+    const result = RR.getResult(roller.roll(expr))
+    // Should terminate and produce a result (3) despite constant ties
+    expect(result).toBe(3)
   })
 })

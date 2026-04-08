@@ -190,6 +190,8 @@ const diceFunctor = lazy(() =>
 const COUNT = match('count')
 const GTE = match('>=')
 const LTE = match('<=')
+const GT = matchChar('>')
+const LT = matchChar('<')
 const EQ = matchChar('=')
 
 const countThreshold: Decoder<TextInput, CountReducer, DecodeError> =
@@ -203,6 +205,22 @@ const countThreshold: Decoder<TextInput, CountReducer, DecodeError> =
       LTE.skipNext(OWS).pickNext(
         positive.map(
           (v): CountReducer => ({ type: 'count', threshold: valueOrLess(v) }),
+        ),
+      ),
+      GT.skipNext(OWS).pickNext(
+        positive.map(
+          (v): CountReducer => ({
+            type: 'count',
+            threshold: valueOrMore(v + 1),
+          }),
+        ),
+      ),
+      LT.skipNext(OWS).pickNext(
+        positive.map(
+          (v): CountReducer => ({
+            type: 'count',
+            threshold: valueOrLess(v - 1),
+          }),
         ),
       ),
       EQ.skipNext(OWS).pickNext(

@@ -97,6 +97,8 @@ describe('dice pool parsing', () => {
         min: 2,
         max: 2,
       },
+      { input: '3d6 count > 4', rendered: '3d6 count >= 5', min: 0, max: 3 },
+      { input: '3d6 count < 3', rendered: '3d6 count <= 2', min: 3, max: 0 },
     ]
 
   test.each(cases)('parses $input', ({ input, rendered, min, max }) => {
