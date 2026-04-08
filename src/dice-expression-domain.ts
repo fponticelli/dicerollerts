@@ -17,6 +17,7 @@ import {
   tooManyDrops,
   tooManyKeeps,
   dropOrKeepShouldBePositive,
+  emptyFaces,
 } from './dice-expression'
 import { Roller } from './roller'
 
@@ -49,6 +50,18 @@ function diceReduceToString(dr: DiceReduce): string {
   }
 }
 
+function customDieToString(faces: number[]): string {
+  if (
+    faces.length === 3 &&
+    faces[0] === -1 &&
+    faces[1] === 0 &&
+    faces[2] === 1
+  ) {
+    return 'dF'
+  }
+  return `d{${faces.join(',')}}`
+}
+
 function binOpToString(op: DiceBinOp): string {
   switch (op) {
     case 'sum':
@@ -75,6 +88,8 @@ export const DE = {
       return String(expr.value)
     } else if (expr.type === 'die') {
       return DE.diceToString(1, expr.sides)
+    } else if (expr.type === 'custom-die') {
+      return customDieToString(expr.faces)
     } else if (expr.type === 'dice-reduce') {
       return (
         diceReduceToString(expr) + DE.expressionExtractorToString(expr.reducer)
@@ -260,6 +275,8 @@ export const DE = {
     switch (expr.type) {
       case 'die':
         return 1
+      case 'custom-die':
+        return 1
       case 'literal':
         return 1
       case 'binary-op':
@@ -278,6 +295,12 @@ export const DE = {
       case 'die':
         if (expr.sides <= 0) {
           return [insufficientSides(expr.sides)]
+        } else {
+          return []
+        }
+      case 'custom-die':
+        if (expr.faces.length === 0) {
+          return [emptyFaces()]
         } else {
           return []
         }

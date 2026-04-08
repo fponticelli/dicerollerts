@@ -77,7 +77,19 @@ export function unaryOp(op: DiceUnOp, expr: DiceExpression): UnaryOp {
   }
 }
 
-export type DiceExpression = Die | Literal | DiceReduce | BinaryOp | UnaryOp
+export interface CustomDie {
+  type: 'custom-die'
+  faces: number[]
+}
+
+export function customDie(faces: number[]): CustomDie {
+  return {
+    type: 'custom-die',
+    faces,
+  }
+}
+
+export type DiceExpression = Die | Literal | DiceReduce | BinaryOp | UnaryOp | CustomDie
 
 export type DiceReducer = 'sum' | 'min' | 'max' | 'average' | 'median'
 
@@ -405,6 +417,16 @@ export function dropOrKeepShouldBePositive(): DropOrKeepShouldBePositive {
   }
 }
 
+export interface EmptyFaces {
+  type: 'empty-faces'
+}
+
+export function emptyFaces(): EmptyFaces {
+  return {
+    type: 'empty-faces',
+  }
+}
+
 export type ValidationMessage =
   | InsufficientSides
   | EmptySet
@@ -412,3 +434,4 @@ export type ValidationMessage =
   | TooManyDrops
   | TooManyKeeps
   | DropOrKeepShouldBePositive
+  | EmptyFaces

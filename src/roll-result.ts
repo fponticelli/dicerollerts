@@ -7,12 +7,26 @@ import {
   type Sides,
 } from './dice-expression'
 
-export interface OneResult {
-  type: 'one-result'
-  die: DieResult
+export interface CustomDieResult {
+  type: 'custom-die-result'
+  result: number
+  faces: number[]
 }
 
-export function oneResult(die: DieResult): OneResult {
+export function customDieResult(result: number, faces: number[]): CustomDieResult {
+  return {
+    type: 'custom-die-result',
+    result,
+    faces,
+  }
+}
+
+export interface OneResult {
+  type: 'one-result'
+  die: DieResult | CustomDieResult
+}
+
+export function oneResult(die: DieResult | CustomDieResult): OneResult {
   return {
     type: 'one-result',
     die,

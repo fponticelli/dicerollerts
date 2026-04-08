@@ -22,6 +22,7 @@ import {
   literalResult,
   dieResult,
   unaryOpResult,
+  customDieResult,
 } from './roll-result'
 import {
   oneResult,
@@ -174,6 +175,9 @@ export class Roller {
       const rolls = dr.reduceable.dice.map((d) => {
         const roll = this.roll(die(d))
         if (roll.type === 'one-result') {
+          if (roll.die.type !== 'die-result') {
+            throw new Error(`Expected die result, got ${JSON.stringify(roll)}`)
+          }
           return roll.die
         } else {
           throw new Error(`Expected die result, got ${JSON.stringify(roll)}`)
@@ -198,6 +202,9 @@ export class Roller {
   roll(expr: DiceExpression): RollResult {
     if (expr.type === 'die') {
       return oneResult(dieResult(this.dieRoll(expr.sides), expr.sides))
+    } else if (expr.type === 'custom-die') {
+      const index = this.dieRoll(expr.faces.length)
+      return oneResult(customDieResult(expr.faces[index - 1], expr.faces))
     } else if (expr.type === 'literal') {
       return literalResult(expr.value, expr.value)
     } else if (expr.type === 'dice-reduce') {
