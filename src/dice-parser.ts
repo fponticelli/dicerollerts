@@ -31,6 +31,7 @@ import {
   reroll,
   type DiceReduce,
   emphasis,
+  customDie as makeCustomDie,
 } from './dice-expression'
 import { CustomError, type DecodeError } from 'partsing/error'
 import { type Decoder } from 'partsing/core/decoder'
@@ -350,12 +351,39 @@ const diceMapeable = lazy(
   },
 )
 
+const customDieFaces = D.skipNext(matchChar('{')).skipNext(OWS).pickNext(
+  whole.atLeastWithSeparator(
+    1,
+    OWS.skipNext(COMMA).skipNext(OWS).withFailure(new CustomError(',')),
+  ),
+).skipNext(OWS.skipNext(matchChar('}')))
+
+const customDieExpression = customDieFaces.map(makeCustomDie)
+
+const fateDieExpression = oneOf(
+  positive.flatMap((count) => {
+    return D.skipNext(matchChar('F')).withResult(
+      count === 1
+        ? makeCustomDie([-1, 0, 1])
+        : makeDiceReduce(
+            makeDiceExpressions(
+              ...Array.from({ length: count }, () => makeCustomDie([-1, 0, 1])),
+            ),
+            'sum' as DiceReducer,
+          ),
+    )
+  }),
+  D.skipNext(matchChar('F')).withResult(makeCustomDie([-1, 0, 1])),
+)
+
 const termExpression = lazy(
   (): Decoder<TextInput, DiceExpression, DecodeError> => {
     return oneOf(
       diceReduce(diceMapeable),
       diceReduce(diceFilterable),
+      fateDieExpression,
       diceReduce(diceExpressions),
+      customDieExpression,
       dieExpression,
       literalExpression,
       unary,

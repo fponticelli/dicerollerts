@@ -8,6 +8,7 @@ import {
 import { DE } from '../src/dice-expression-domain'
 import { Roller } from '../src/roller'
 import { RR } from '../src/roll-result-domain'
+import { DiceParser } from '../src/dice-parser'
 
 function maxRoller() {
   return new Roller((max) => max)
@@ -73,5 +74,35 @@ describe('custom die validation', () => {
 
   test('non-empty faces is valid', () => {
     expect(DE.validate(customDie([1, 2, 3]))).toBeNull()
+  })
+})
+
+describe('custom die parsing', () => {
+  const cases: { input: string; rendered: string; min: number; max: number }[] = [
+    { input: 'd{1,2,3}', rendered: 'd{1,2,3}', min: 1, max: 3 },
+    { input: 'd{1,1,2,2,3,4}', rendered: 'd{1,1,2,2,3,4}', min: 1, max: 4 },
+    { input: 'd{ 1 , 2 , 3 }', rendered: 'd{1,2,3}', min: 1, max: 3 },
+    { input: 'dF', rendered: 'dF', min: -1, max: 1 },
+    { input: '4dF', rendered: '4dF', min: -4, max: 4 },
+    { input: 'dF + 3', rendered: 'dF + 3', min: 2, max: 4 },
+    { input: 'd{2,4,6} + 1', rendered: 'd{2,4,6} + 1', min: 3, max: 7 },
+  ]
+
+  test.each(cases)(
+    'parses $input',
+    ({ input, rendered, min, max }) => {
+      const parsed = DiceParser.parse(input)
+      expect(parsed.isSuccess()).toBe(true)
+      if (parsed.isSuccess()) {
+        expect(DE.toString(parsed.value)).toBe(rendered)
+        expect(RR.getResult(minRoller().roll(parsed.value))).toBe(min)
+        expect(RR.getResult(maxRoller().roll(parsed.value))).toBe(max)
+      }
+    },
+  )
+
+  test('rejects empty faces d{}', () => {
+    const parsed = DiceParser.parse('d{}')
+    expect(parsed.isSuccess()).toBe(false)
   })
 })

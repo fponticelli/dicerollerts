@@ -202,15 +202,26 @@ export const DE = {
   },
 
   allOneDieSameSides(exprs: DiceExpression[]) {
-    const sides = []
-    for (const expr of exprs) {
-      if (expr.type === 'die') {
-        sides.push(expr.sides)
-      } else {
-        return false
+    if (exprs.length === 0) return false
+    const first = exprs[0]
+    if (first.type === 'die') {
+      for (const expr of exprs) {
+        if (expr.type !== 'die' || expr.sides !== first.sides) return false
       }
+      return true
+    } else if (first.type === 'custom-die') {
+      for (const expr of exprs) {
+        if (
+          expr.type !== 'custom-die' ||
+          expr.faces.length !== first.faces.length ||
+          expr.faces.some((f, i) => f !== first.faces[i])
+        ) {
+          return false
+        }
+      }
+      return true
     }
-    return distinctPrimitive(sides).length === 1
+    return false
   },
 
   expressionExtractorToString(reducer: DiceReducer): string {
