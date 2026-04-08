@@ -344,3 +344,49 @@ describe('exact stats for functors', () => {
     expect(DiceStats.max(expr)).toBe(24) // both roll 6+6
   })
 })
+
+describe('async Monte Carlo', () => {
+  test('yields progress chunks', async () => {
+    const chunks: { completed: number; total: number }[] = []
+    for await (const progress of DiceStats.monteCarloAsync(die(6), {
+      trials: 5000,
+      chunkSize: 1000,
+    })) {
+      chunks.push({ completed: progress.completed, total: progress.total })
+    }
+    expect(chunks.length).toBe(5)
+    expect(chunks[0].completed).toBe(1000)
+    expect(chunks[4].completed).toBe(5000)
+    expect(chunks[4].total).toBe(5000)
+  })
+
+  test('final result has valid statistics', async () => {
+    let lastResult
+    for await (const progress of DiceStats.monteCarloAsync(die(6), {
+      trials: 10000,
+      chunkSize: 5000,
+    })) {
+      lastResult = progress.result
+    }
+    expect(lastResult).toBeDefined()
+    expect(lastResult!.mean).toBeCloseTo(3.5, 0)
+    expect(lastResult!.min).toBe(1)
+    expect(lastResult!.max).toBe(6)
+  })
+
+  test('accepts custom roller', async () => {
+    const { Roller } = await import('../src/roller')
+    const roller = new Roller((max) => max) // always max
+    let lastResult
+    for await (const progress of DiceStats.monteCarloAsync(die(6), {
+      trials: 100,
+      chunkSize: 100,
+      roller,
+    })) {
+      lastResult = progress.result
+    }
+    expect(lastResult!.mean).toBe(6)
+    expect(lastResult!.min).toBe(6)
+    expect(lastResult!.max).toBe(6)
+  })
+})

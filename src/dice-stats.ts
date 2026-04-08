@@ -350,7 +350,7 @@ function varianceFromDist(dist: Distribution): number {
   return sum
 }
 
-interface MonteCarloResult {
+export interface MonteCarloResult {
   mean: number
   stddev: number
   min: number
@@ -359,7 +359,7 @@ interface MonteCarloResult {
   percentile: (p: number) => number
 }
 
-interface SummaryResult {
+export interface SummaryResult {
   min: number
   max: number
   mean: number
@@ -370,6 +370,18 @@ interface SummaryResult {
 
 interface MonteCarloOptions {
   trials?: number
+}
+
+export interface MonteCarloAsyncOptions {
+  trials?: number
+  chunkSize?: number
+  roller?: Roller
+}
+
+export interface MonteCarloProgress {
+  completed: number
+  total: number
+  result: MonteCarloResult
 }
 
 function percentileFromDist(dist: Distribution, p: number): number {
@@ -385,6 +397,31 @@ function percentileFromDist(dist: Distribution, p: number): number {
 
 function stddevFromDist(dist: Distribution): number {
   return Math.sqrt(varianceFromDist(dist))
+}
+
+function buildMonteCarloResult(
+  results: number[],
+  rawDist: Map<number, number>,
+): MonteCarloResult {
+  const count = results.length
+  const dist: Map<number, number> = new Map()
+  for (const [k, v] of rawDist) {
+    dist.set(k, v / count)
+  }
+  const mean = results.reduce((a, b) => a + b, 0) / count
+  const variance = results.reduce((a, b) => a + (b - mean) ** 2, 0) / count
+  const sorted = results.slice().sort((a, b) => a - b)
+  return {
+    mean,
+    stddev: Math.sqrt(variance),
+    min: sorted[0],
+    max: sorted[sorted.length - 1],
+    distribution: dist,
+    percentile: (p: number) => {
+      const idx = Math.ceil((p / 100) * sorted.length) - 1
+      return sorted[Math.max(0, idx)]
+    },
+  }
 }
 
 export const DiceStats = {
@@ -437,26 +474,33 @@ export const DiceStats = {
       dist.set(value, (dist.get(value) ?? 0) + 1)
     }
 
-    // Normalize distribution
-    for (const [k, v] of dist) {
-      dist.set(k, v / trials)
-    }
+    return buildMonteCarloResult(results, dist)
+  },
 
-    const mean = results.reduce((a, b) => a + b, 0) / results.length
-    const variance =
-      results.reduce((a, b) => a + (b - mean) ** 2, 0) / results.length
-    const sorted = results.slice().sort((a, b) => a - b)
+  async *monteCarloAsync(
+    expr: DiceExpression,
+    options?: MonteCarloAsyncOptions,
+  ): AsyncGenerator<MonteCarloProgress> {
+    const total = options?.trials ?? 10000
+    const chunkSize = options?.chunkSize ?? 1000
+    const roller =
+      options?.roller ??
+      new Roller((max) => Math.floor(Math.random() * max) + 1)
+    const results: number[] = []
+    const dist: Map<number, number> = new Map()
 
-    return {
-      mean,
-      stddev: Math.sqrt(variance),
-      min: sorted[0],
-      max: sorted[sorted.length - 1],
-      distribution: dist,
-      percentile: (p: number) => {
-        const idx = Math.ceil((p / 100) * sorted.length) - 1
-        return sorted[Math.max(0, idx)]
-      },
+    for (let i = 0; i < total; i++) {
+      const value = RR.getResult(roller.roll(expr))
+      results.push(value)
+      dist.set(value, (dist.get(value) ?? 0) + 1)
+
+      if ((i + 1) % chunkSize === 0 || i === total - 1) {
+        yield {
+          completed: i + 1,
+          total,
+          result: buildMonteCarloResult(results, dist),
+        }
+      }
     }
   },
 
