@@ -10,8 +10,12 @@ import {
   diceListWithFilter,
   filterableDiceArray,
   explode,
+  reroll,
+  compound,
+  emphasis,
   always,
   exact,
+  upTo,
   drop,
   keep,
   valueOrMore,
@@ -264,5 +268,79 @@ describe('summary', () => {
     const result = DiceStats.summary(expr)
     expect(result.min).toBeGreaterThanOrEqual(1)
     expect(result.mean).toBeGreaterThan(0)
+  })
+})
+
+describe('exact stats for functors', () => {
+  test('d6 explode once on 6', () => {
+    const expr = diceReduce(
+      diceListWithMap([6], explode(upTo(1), exact(6))),
+      'sum',
+    )
+    const dist = DiceStats.distribution(expr)
+    // 1-5 each have prob 1/6, 7-11 each have prob 1/36, 12 has prob 1/36
+    expect(dist.get(1)).toBeCloseTo(1 / 6)
+    expect(dist.get(5)).toBeCloseTo(1 / 6)
+    expect(dist.get(7)).toBeCloseTo(1 / 36)
+    expect(dist.get(12)).toBeCloseTo(1 / 36)
+    expect(dist.has(6)).toBe(false) // 6 always explodes
+    expect(DiceStats.mean(expr)).toBeCloseTo(4.083, 2)
+  })
+
+  test('d6 reroll once on 1', () => {
+    const expr = diceReduce(
+      diceListWithMap([6], reroll(upTo(1), exact(1))),
+      'sum',
+    )
+    const dist = DiceStats.distribution(expr)
+    // 1 has prob 1/36 (roll 1, reroll 1)
+    // 2 has prob 1/6 + 1/36 (roll 2 directly, or roll 1 then reroll 2)
+    expect(dist.get(1)).toBeCloseTo(1 / 36)
+    expect(dist.get(2)).toBeCloseTo(1 / 6 + 1 / 36)
+    expect(DiceStats.mean(expr)).toBeCloseTo(3.917, 2)
+  })
+
+  test('d6 compound once on 6', () => {
+    const expr = diceReduce(
+      diceListWithMap([6], compound(upTo(1), exact(6))),
+      'sum',
+    )
+    const dist = DiceStats.distribution(expr)
+    // Same distribution as explode once on 6 for single die
+    expect(dist.get(1)).toBeCloseTo(1 / 6)
+    expect(dist.get(7)).toBeCloseTo(1 / 36)
+    expect(dist.get(12)).toBeCloseTo(1 / 36)
+  })
+
+  test('d20 emphasis exact distribution', () => {
+    const expr = diceReduce(
+      diceListWithMap([20], emphasis('high', 'average')),
+      'sum',
+    )
+    const dist = DiceStats.distribution(expr)
+    expect(dist.size).toBe(20)
+    // Emphasis should favor extreme values
+    const p1 = dist.get(1) ?? 0
+    const p10 = dist.get(10) ?? 0
+    const p20 = dist.get(20) ?? 0
+    expect(p20).toBeGreaterThan(p10) // extremes more likely
+    expect(p1).toBeGreaterThan(p10)
+  })
+
+  test('always times still throws', () => {
+    const expr = diceReduce(
+      diceListWithMap([6], explode(always(), exact(6))),
+      'sum',
+    )
+    expect(() => DiceStats.distribution(expr)).toThrow('exact-not-supported')
+  })
+
+  test('multiple dice with explode once', () => {
+    const expr = diceReduce(
+      diceListWithMap([6, 6], explode(upTo(1), exact(6))),
+      'sum',
+    )
+    expect(DiceStats.min(expr)).toBe(2) // both roll 1
+    expect(DiceStats.max(expr)).toBe(24) // both roll 6+6
   })
 })

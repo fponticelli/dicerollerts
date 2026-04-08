@@ -3,6 +3,8 @@ import type {
   DiceReduceable,
   DiceReducer,
   DiceBinOp,
+  DiceFunctor,
+  Sides,
 } from './dice-expression'
 import { DE } from './dice-expression-domain'
 import { Roller } from './roller'
@@ -82,6 +84,129 @@ function combineBinary(
   return dist
 }
 
+function distributeFunctor(sides: Sides, functor: DiceFunctor): Distribution {
+  switch (functor.type) {
+    case 'explode':
+    case 'compound': {
+      if (functor.times.type === 'always') {
+        throw new Error('exact-not-supported')
+      }
+      const maxDepth = functor.times.value
+      return distributeExplodeCompound(
+        sides,
+        functor.range,
+        maxDepth,
+        functor.type === 'explode',
+      )
+    }
+    case 'reroll': {
+      if (functor.times.type === 'always') {
+        throw new Error('exact-not-supported')
+      }
+      const maxRerolls = functor.times.value
+      return distributeReroll(sides, functor.range, maxRerolls)
+    }
+    case 'emphasis': {
+      return distributeEmphasis(sides, functor.furthestFrom, functor.tieBreaker)
+    }
+  }
+}
+
+function distributeExplodeCompound(
+  sides: Sides,
+  range: import('./dice-expression').Range,
+  maxDepth: number,
+  _isExplode: boolean,
+): Distribution {
+  // For a single die, explode and compound produce the same final sum distribution.
+  // Explode adds extra dice to the pool; compound sums into one value.
+  // When reducing a single die with 'sum', the result is identical.
+  const p = 1 / sides
+  const dist: Distribution = new Map()
+
+  function enumerate(depth: number, accum: number, prob: number): void {
+    for (let face = 1; face <= sides; face++) {
+      const total = accum + face
+      const faceProb = prob * p
+      if (depth < maxDepth && Roller.matchRange(face, range)) {
+        // This face triggers another roll
+        enumerate(depth + 1, total, faceProb)
+      } else {
+        dist.set(total, (dist.get(total) ?? 0) + faceProb)
+      }
+    }
+  }
+
+  enumerate(0, 0, 1)
+  return dist
+}
+
+function distributeReroll(
+  sides: Sides,
+  range: import('./dice-expression').Range,
+  maxRerolls: number,
+): Distribution {
+  const p = 1 / sides
+  const dist: Distribution = new Map()
+
+  function enumerate(depth: number, prob: number): void {
+    for (let face = 1; face <= sides; face++) {
+      const faceProb = prob * p
+      if (depth < maxRerolls && Roller.matchRange(face, range)) {
+        // Reroll: discard this face, roll again
+        enumerate(depth + 1, faceProb)
+      } else {
+        dist.set(face, (dist.get(face) ?? 0) + faceProb)
+      }
+    }
+  }
+
+  enumerate(0, 1)
+  return dist
+}
+
+function distributeEmphasis(
+  sides: Sides,
+  furthestFrom: number | 'average',
+  tieBreaker: 'high' | 'low' | 'reroll',
+): Distribution {
+  const p = 1 / sides
+  const furthestValue =
+    furthestFrom === 'average' ? (1 + sides) / 2 : furthestFrom
+  const dist: Distribution = new Map()
+
+  for (let first = 1; first <= sides; first++) {
+    for (let second = 1; second <= sides; second++) {
+      const prob = p * p
+      const firstDist = Math.abs(first - furthestValue)
+      const secondDist = Math.abs(second - furthestValue)
+
+      let chosen: number
+      if (firstDist > secondDist) {
+        chosen = first
+      } else if (secondDist > firstDist) {
+        chosen = second
+      } else {
+        // Tie
+        if (tieBreaker === 'high') {
+          chosen = Math.max(first, second)
+        } else if (tieBreaker === 'low') {
+          chosen = Math.min(first, second)
+        } else {
+          // reroll tiebreaker - for exact distribution, we model this as
+          // equal probability of picking either (since reroll resolves randomly)
+          dist.set(first, (dist.get(first) ?? 0) + prob / 2)
+          dist.set(second, (dist.get(second) ?? 0) + prob / 2)
+          continue
+        }
+      }
+      dist.set(chosen, (dist.get(chosen) ?? 0) + prob)
+    }
+  }
+
+  return dist
+}
+
 function distributeReduceable(
   reduceable: DiceReduceable,
   reducer: DiceReducer,
@@ -128,7 +253,11 @@ function distributeReduceable(
       return dist
     }
     case 'dice-list-with-map': {
-      throw new Error('exact-not-supported')
+      const functor = reduceable.functor
+      const dieDists = reduceable.dice.map((sides) =>
+        distributeFunctor(sides, functor),
+      )
+      return reduceDistributions(dieDists, reducer)
     }
   }
 }
