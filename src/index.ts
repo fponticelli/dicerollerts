@@ -131,3 +131,52 @@ export {
 export { Roller, type RollerOptions } from './roller'
 
 export { DiceStats } from './dice-stats'
+
+export type {
+  Program,
+  Statement,
+  Assignment,
+  ExpressionStatement,
+  Expression,
+  NumberLiteral,
+  BooleanLiteral,
+  StringLiteral,
+  VariableRef,
+  DiceExpr,
+  BinaryExpr,
+  BinaryOper,
+  UnaryExpr,
+  IfExpr,
+  RecordExpr,
+  RecordField,
+  ArrayExpr,
+  RepeatExpr,
+  FieldAccess,
+  IndexAccess,
+  Value,
+  RuntimeError,
+} from './program'
+
+export {
+  program,
+  assignment,
+  expressionStatement,
+  numberLiteral,
+  booleanLiteral,
+  stringLiteral,
+  variableRef,
+  diceExpr,
+  binaryExpr,
+  unaryExpr,
+  ifExpr,
+  recordExpr,
+  arrayExpr,
+  repeatExpr,
+  fieldAccess,
+  indexAccess,
+  runtimeError,
+} from './program'
+
+export { Evaluator } from './evaluator'
+export { ProgramStats, type FieldStats } from './program-stats'
+export { ProgramParser, type ParseProgramResult } from './program-parser'

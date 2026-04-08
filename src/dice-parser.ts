@@ -514,6 +514,10 @@ const decode = (
   return grammar.run({ input, index: 0 })
 }
 
+import { ProgramParser, type ParseProgramResult } from './program-parser'
+
+export type { ParseProgramResult }
+
 export const DiceParser = {
   normalize: (input: string) => {
     const result = DiceParser.parseOrNull(input)
@@ -553,5 +557,8 @@ export const DiceParser = {
     const failureIndex = failureInput?.index ?? 0
     const errors = buildParseErrors(input, failureIndex, messages)
     return { success: false, errors }
+  },
+  parseProgram(input: string): ParseProgramResult {
+    return ProgramParser.parse(input)
   },
 }
