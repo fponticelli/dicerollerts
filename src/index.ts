@@ -127,3 +127,5 @@ export {
 } from './roll-result'
 
 export { Roller, type RollerOptions } from './roller'
+
+export { DiceStats } from './dice-stats'
