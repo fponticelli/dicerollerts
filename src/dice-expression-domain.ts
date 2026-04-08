@@ -18,6 +18,9 @@ import {
   tooManyKeeps,
   dropOrKeepShouldBePositive,
   emptyFaces,
+  literal,
+  unaryOp,
+  binaryOp,
 } from './dice-expression'
 import { Roller } from './roller'
 
@@ -413,6 +416,51 @@ export const DE = {
       return list
     } else {
       return null
+    }
+  },
+
+  simplify(expr: DiceExpression): DiceExpression {
+    switch (expr.type) {
+      case 'literal':
+      case 'die':
+      case 'custom-die':
+        return expr
+      case 'unary-op': {
+        const inner = DE.simplify(expr.expr)
+        if (expr.op === 'negate' && inner.type === 'literal') {
+          return literal(-inner.value)
+        }
+        return unaryOp(expr.op, inner)
+      }
+      case 'binary-op': {
+        const left = DE.simplify(expr.left)
+        const right = DE.simplify(expr.right)
+        if (left.type === 'literal' && right.type === 'literal') {
+          switch (expr.op) {
+            case 'sum':
+              return literal(left.value + right.value)
+            case 'difference':
+              return literal(left.value - right.value)
+            case 'multiplication':
+              return literal(left.value * right.value)
+            case 'division':
+              return literal(Math.trunc(left.value / right.value))
+          }
+        }
+        if (expr.op === 'sum') {
+          if (left.type === 'literal' && left.value === 0) return right
+          if (right.type === 'literal' && right.value === 0) return left
+        }
+        if (expr.op === 'multiplication') {
+          if (left.type === 'literal' && left.value === 1) return right
+          if (right.type === 'literal' && right.value === 1) return left
+          if (left.type === 'literal' && left.value === 0) return literal(0)
+          if (right.type === 'literal' && right.value === 0) return literal(0)
+        }
+        return binaryOp(expr.op, left, right)
+      }
+      case 'dice-reduce':
+        return expr
     }
   },
 }
