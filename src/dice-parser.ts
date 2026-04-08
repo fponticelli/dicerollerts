@@ -197,17 +197,17 @@ const negate = lazy(() =>
 ) // .mapError(_ => 'negate')
 const unary = negate
 
-const addSubSymbol = oneOf(
+const addSubSymbol: Decoder<TextInput, 'sum' | 'difference', DecodeError> = oneOf(
   PLUS.withResult('sum' as const),
   MINUS.withResult('difference' as const),
 )
 
-const mulDivSymbol = oneOf(
+const mulDivSymbol: Decoder<TextInput, 'multiplication' | 'division', DecodeError> = oneOf(
   MULTIPLICATION.withResult('multiplication' as const),
   DIVISION.withResult('division' as const),
 )
 
-const mulDivRight = OWS.pickNext(
+const mulDivRight: Decoder<TextInput, { op: 'multiplication' | 'division'; right: DiceExpression }, DecodeError> = OWS.pickNext(
   mulDivSymbol.flatMap((op) => {
     return OWS.pickNext(termExpression.map((right) => ({ op, right })))
   }),
@@ -228,7 +228,7 @@ const addSubFactor: Decoder<TextInput, DiceExpression, DecodeError> = lazy(
   () => oneOf(mulDivExpr, termExpression),
 )
 
-const addSubRight = OWS.pickNext(
+const addSubRight: Decoder<TextInput, { op: 'sum' | 'difference'; right: DiceExpression }, DecodeError> = OWS.pickNext(
   addSubSymbol.flatMap((op) => {
     return OWS.pickNext(addSubFactor.map((right) => ({ op, right })))
   }),
