@@ -1,4 +1,4 @@
-import { die, literal, binaryOp, diceReduce, diceExpressions, customDie, unaryOp } from '../src/dice-expression'
+import { die, literal, binaryOp, diceReduce, diceExpressions, customDie, unaryOp, diceListWithMap, explode, always, exact } from '../src/dice-expression'
 import { DiceStats } from '../src/dice-stats'
 
 describe('exact probability analysis', () => {
@@ -83,5 +83,54 @@ describe('exact probability analysis', () => {
     const p50 = DiceStats.percentile(die(6), 50)
     expect(p50).toBeGreaterThanOrEqual(3)
     expect(p50).toBeLessThanOrEqual(4)
+  })
+})
+
+describe('Monte Carlo analysis', () => {
+  test('d6 Monte Carlo approximates uniform distribution', () => {
+    const result = DiceStats.monteCarlo(die(6), { trials: 50000 })
+    expect(result.mean).toBeCloseTo(3.5, 0)
+    expect(result.min).toBe(1)
+    expect(result.max).toBe(6)
+    expect(result.distribution.size).toBe(6)
+  })
+
+  test('2d6 Monte Carlo approximates correct mean', () => {
+    const expr = binaryOp('sum', die(6), die(6))
+    const result = DiceStats.monteCarlo(expr, { trials: 50000 })
+    expect(result.mean).toBeCloseTo(7, 0)
+  })
+
+  test('Monte Carlo default trials', () => {
+    const result = DiceStats.monteCarlo(die(6))
+    expect(result.mean).toBeCloseTo(3.5, 0)
+  })
+
+  test('Monte Carlo percentile function', () => {
+    const result = DiceStats.monteCarlo(die(6), { trials: 50000 })
+    const p50 = result.percentile(50)
+    expect(p50).toBeGreaterThanOrEqual(3)
+    expect(p50).toBeLessThanOrEqual(4)
+  })
+})
+
+describe('summary', () => {
+  test('d6 summary uses exact analysis', () => {
+    const result = DiceStats.summary(die(6))
+    expect(result.min).toBe(1)
+    expect(result.max).toBe(6)
+    expect(result.mean).toBeCloseTo(3.5)
+    expect(result.distribution.size).toBe(6)
+    expect(result.percentiles[50]).toBeGreaterThanOrEqual(3)
+  })
+
+  test('summary falls back to Monte Carlo for complex expressions', () => {
+    const expr = diceReduce(
+      diceListWithMap([6], explode(always(), exact(6))),
+      'sum',
+    )
+    const result = DiceStats.summary(expr)
+    expect(result.min).toBeGreaterThanOrEqual(1)
+    expect(result.mean).toBeGreaterThan(0)
   })
 })

@@ -1,5 +1,6 @@
 import type { DiceExpression, DiceReduceable, DiceReducer, DiceBinOp, Range } from './dice-expression'
 import { Roller } from './roller'
+import { RR } from './roll-result-domain'
 
 type Distribution = Map<number, number>
 
@@ -196,6 +197,43 @@ function varianceFromDist(dist: Distribution): number {
   return sum
 }
 
+interface MonteCarloResult {
+  mean: number
+  stddev: number
+  min: number
+  max: number
+  distribution: Map<number, number>
+  percentile: (p: number) => number
+}
+
+interface SummaryResult {
+  min: number
+  max: number
+  mean: number
+  stddev: number
+  distribution: Map<number, number>
+  percentiles: Record<number, number>
+}
+
+interface MonteCarloOptions {
+  trials?: number
+}
+
+function percentileFromDist(dist: Distribution, p: number): number {
+  const entries = [...dist.entries()].sort((a, b) => a[0] - b[0])
+  const target = p / 100
+  let cumulative = 0
+  for (const [v, prob] of entries) {
+    cumulative += prob
+    if (cumulative >= target) return v
+  }
+  return entries[entries.length - 1][0]
+}
+
+function stddevFromDist(dist: Distribution): number {
+  return Math.sqrt(varianceFromDist(dist))
+}
+
 export const DiceStats = {
   distribution(expr: DiceExpression): Distribution {
     return distributionOf(expr)
@@ -228,14 +266,72 @@ export const DiceStats = {
   },
 
   percentile(expr: DiceExpression, p: number): number {
-    const dist = distributionOf(expr)
-    const entries = [...dist.entries()].sort((a, b) => a[0] - b[0])
-    const target = p / 100
-    let cumulative = 0
-    for (const [v, prob] of entries) {
-      cumulative += prob
-      if (cumulative >= target) return v
+    return percentileFromDist(distributionOf(expr), p)
+  },
+
+  monteCarlo(expr: DiceExpression, options?: MonteCarloOptions): MonteCarloResult {
+    const trials = options?.trials ?? 10000
+    const roller = new Roller((max) => Math.floor(Math.random() * max) + 1)
+    const results: number[] = []
+    const dist: Map<number, number> = new Map()
+
+    for (let i = 0; i < trials; i++) {
+      const value = RR.getResult(roller.roll(expr))
+      results.push(value)
+      dist.set(value, (dist.get(value) ?? 0) + 1)
     }
-    return entries[entries.length - 1][0]
+
+    // Normalize distribution
+    for (const [k, v] of dist) {
+      dist.set(k, v / trials)
+    }
+
+    const mean = results.reduce((a, b) => a + b, 0) / results.length
+    const variance = results.reduce((a, b) => a + (b - mean) ** 2, 0) / results.length
+    const sorted = results.slice().sort((a, b) => a - b)
+
+    return {
+      mean,
+      stddev: Math.sqrt(variance),
+      min: sorted[0],
+      max: sorted[sorted.length - 1],
+      distribution: dist,
+      percentile: (p: number) => {
+        const idx = Math.ceil((p / 100) * sorted.length) - 1
+        return sorted[Math.max(0, idx)]
+      },
+    }
+  },
+
+  summary(expr: DiceExpression): SummaryResult {
+    try {
+      const dist = DiceStats.distribution(expr)
+      return {
+        min: Math.min(...dist.keys()),
+        max: Math.max(...dist.keys()),
+        mean: meanFromDist(dist),
+        stddev: stddevFromDist(dist),
+        distribution: dist,
+        percentiles: {
+          25: percentileFromDist(dist, 25),
+          50: percentileFromDist(dist, 50),
+          75: percentileFromDist(dist, 75),
+        },
+      }
+    } catch {
+      const mc = DiceStats.monteCarlo(expr, { trials: 50000 })
+      return {
+        min: mc.min,
+        max: mc.max,
+        mean: mc.mean,
+        stddev: mc.stddev,
+        distribution: mc.distribution,
+        percentiles: {
+          25: mc.percentile(25),
+          50: mc.percentile(50),
+          75: mc.percentile(75),
+        },
+      }
+    }
   },
 }
