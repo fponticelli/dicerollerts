@@ -11,6 +11,7 @@ import type { CountReducer, Range } from '../src/dice-expression'
 import { DE } from '../src/dice-expression-domain'
 import { Roller } from '../src/roller'
 import { RR } from '../src/roll-result-domain'
+import { DiceParser } from '../src/dice-parser'
 
 function maxRoller() {
   return new Roller((max) => max)
@@ -80,4 +81,28 @@ describe('dice pool / success counting', () => {
     )
     expect(DE.toString(expr)).toBe('3d6 count <= 2')
   })
+})
+
+describe('dice pool parsing', () => {
+  const cases: { input: string; rendered: string; min: number; max: number }[] = [
+    { input: '4d10 count >= 6', rendered: '4d10 count >= 6', min: 0, max: 4 },
+    { input: '8d10 count >= 6', rendered: '8d10 count >= 6', min: 0, max: 8 },
+    { input: '3d6 count = 6', rendered: '3d6 count = 6', min: 0, max: 3 },
+    { input: '3d6 count <= 2', rendered: '3d6 count <= 2', min: 3, max: 0 },
+    { input: '4d10c6', rendered: '4d10 count >= 6', min: 0, max: 4 },
+    { input: '(1,2,3) count >= 2', rendered: '(1,2,3) count >= 2', min: 2, max: 2 },
+  ]
+
+  test.each(cases)(
+    'parses $input',
+    ({ input, rendered, min, max }) => {
+      const parsed = DiceParser.parse(input)
+      expect(parsed.isSuccess()).toBe(true)
+      if (parsed.isSuccess()) {
+        expect(DE.toString(parsed.value)).toBe(rendered)
+        expect(RR.getResult(minRoller().roll(parsed.value))).toBe(min)
+        expect(RR.getResult(maxRoller().roll(parsed.value))).toBe(max)
+      }
+    },
+  )
 })

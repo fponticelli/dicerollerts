@@ -20,6 +20,7 @@ import {
   literal,
   type DiceReduceable,
   type DiceReducer,
+  type CountReducer,
   diceExpressions as makeDiceExpressions,
   filterableDiceArray,
   diceListWithFilter,
@@ -185,6 +186,19 @@ const diceFunctor = lazy(() =>
   ),
 )
 
+const COUNT = match('count')
+const GTE = match('>=')
+const LTE = match('<=')
+const EQ = matchChar('=')
+
+const countThreshold: Decoder<TextInput, CountReducer, DecodeError> = COUNT.skipNext(WS).pickNext(
+  oneOf(
+    GTE.skipNext(OWS).pickNext(positive.map((v): CountReducer => ({ type: 'count', threshold: valueOrMore(v) }))),
+    LTE.skipNext(OWS).pickNext(positive.map((v): CountReducer => ({ type: 'count', threshold: valueOrLess(v) }))),
+    EQ.skipNext(OWS).pickNext(positive.map((v): CountReducer => ({ type: 'count', threshold: exact(v) }))),
+  ),
+)
+
 const SUM = match('sum')
 const AVERAGE = oneOf(match('average'), match('avg'))
 const MEDIAN = oneOf(match('median'), match('med'))
@@ -259,8 +273,13 @@ const literalExpression = whole.map(literal)
 const diceReduce = (
   reduceable: Decoder<TextInput, DiceReduceable, DecodeError>,
 ): Decoder<TextInput, DiceReduce, DecodeError> => {
-  return reduceable
-    .flatMap((red) => {
+  return oneOf(
+    reduceable.flatMap((red) => {
+      return OWS.pickNext(countThreshold).map((reducer) =>
+        makeDiceReduce(red, reducer),
+      )
+    }),
+    reduceable.flatMap((red) => {
       return OWS.pickNext(
         oneOf(
           SUM.withResult('sum'),
@@ -270,8 +289,9 @@ const diceReduce = (
           MAX.withResult('max'),
         ),
       ).map((reducer) => makeDiceReduce(red, reducer as DiceReducer))
-    })
-    .or(reduceable.map((v) => makeDiceReduce(v, 'sum')))
+    }),
+    reduceable.map((v) => makeDiceReduce(v, 'sum')),
+  )
 }
 
 const commaSeparated = <T>(
@@ -381,12 +401,32 @@ const fateDieExpression = oneOf(
   D.skipNext(matchChar('F')).withResult(makeCustomDie([-1, 0, 1])),
 )
 
+const diceCountShorthand = lazy(
+  (): Decoder<TextInput, DiceReduce, DecodeError> => {
+    return positive.flatMap((rolls) => {
+      return (die as Decoder<TextInput, number, DecodeError>).flatMap((sides) => {
+        return matchChar('c')
+          .skipNext(OWS)
+          .pickNext(positive)
+          .map((v) => {
+            const dice = Array.from({ length: rolls }, () => makeDie(sides))
+            return makeDiceReduce(
+              makeDiceExpressions(...dice),
+              { type: 'count' as const, threshold: valueOrMore(v) } as CountReducer,
+            )
+          })
+      })
+    })
+  },
+)
+
 const termExpression = lazy(
   (): Decoder<TextInput, DiceExpression, DecodeError> => {
     return oneOf(
       diceReduce(diceMapeable),
       diceReduce(diceFilterable),
       fateDieExpression,
+      diceCountShorthand,
       diceReduce(diceExpressions),
       customDieExpression,
       dieExpression,
