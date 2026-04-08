@@ -1,9 +1,17 @@
 export { DE } from './dice-expression-domain'
 export {
-  type DiceBinOp, type DiceUnOp, type DiceReducer, type LowHigh, always,
+  type DiceBinOp,
+  type DiceUnOp,
+  type DiceReducer,
+  type SimpleReducer,
+  type CountReducer,
+  type LowHigh,
+  always,
   between,
   binaryOp,
   composite,
+  compound,
+  customDie,
   die,
   diceListWithFilter,
   diceListWithMap,
@@ -18,6 +26,7 @@ export {
   keep,
   literal,
   dropOrKeepShouldBePositive,
+  emptyFaces,
   emptySet,
   insufficientSides,
   tooManyDrops,
@@ -25,23 +34,29 @@ export {
   exact,
   upTo,
   valueOrLess,
-  valueOrMore
+  valueOrMore,
 } from './dice-expression'
 
 export type {
   Always,
   Between,
   BinaryOp,
-  Composite, DiceExpression,
+  Composite,
+  Compound,
+  CustomDie,
+  DiceExpression,
   DiceExpressions,
   DiceFunctor,
-  DiceReduce, Die,
+  DiceReduce,
+  Die,
   DiceFilter,
   DiceFilterable,
   DiceListWithFilter,
   DiceListWithMap,
-  DiceReduceable, Drop,
+  DiceReduceable,
+  Drop,
   DropOrKeepShouldBePositive,
+  EmptyFaces,
   EmptySet,
   Exact,
   Emphasis,
@@ -51,7 +66,8 @@ export type {
   InfiniteReroll,
   InsufficientSides,
   Keep,
-  Literal, Range,
+  Literal,
+  Range,
   Reroll,
   Roll,
   Sides,
@@ -62,15 +78,18 @@ export type {
   ValidationMessage,
   UpTo,
   ValueOrLess,
-  ValueOrMore
+  ValueOrMore,
 } from './dice-expression'
 
 export { DiceParser } from './dice-parser'
+export type { ParseError, ParseWithErrorsResult } from './parse-error'
+export { suggestKeyword } from './parse-error'
 
 export { RR } from './roll-result-domain'
 
 export {
   type BinaryOpResult,
+  type CustomDieResult,
   type DiceExpressionsResult,
   type DiceFilterableResult,
   type DiceMapeableResult,
@@ -80,6 +99,7 @@ export {
   type DiceResultMapped,
   type DieResultFilter,
   type DiscardResult,
+  type Compounded,
   type Exploded,
   type KeepResult,
   type LiteralResult,
@@ -89,6 +109,8 @@ export {
   type RollResult,
   type UnaryOpResult,
   binaryOpResult,
+  compounded,
+  customDieResult,
   diceExpressionsResult,
   diceFilterableResult,
   diceMapeableResult,
@@ -101,7 +123,9 @@ export {
   normal,
   oneResult,
   rerolled,
-  unaryOpResult
+  unaryOpResult,
 } from './roll-result'
 
-export { Roller } from './roller'
+export { Roller, type RollerOptions } from './roller'
+
+export { DiceStats } from './dice-stats'

@@ -1,14 +1,38 @@
-import { type DiceBinOp, type DiceFilter, type DiceFunctor, type DiceReducer, type DiceUnOp, type Sides } from './dice-expression'
+import {
+  type DiceBinOp,
+  type DiceFilter,
+  type DiceFunctor,
+  type DiceReducer,
+  type DiceUnOp,
+  type Sides,
+} from './dice-expression'
+
+export interface CustomDieResult {
+  type: 'custom-die-result'
+  result: number
+  faces: number[]
+}
+
+export function customDieResult(
+  result: number,
+  faces: number[],
+): CustomDieResult {
+  return {
+    type: 'custom-die-result',
+    result,
+    faces,
+  }
+}
 
 export interface OneResult {
   type: 'one-result'
-  die: DieResult
+  die: DieResult | CustomDieResult
 }
 
-export function oneResult (die: DieResult): OneResult {
+export function oneResult(die: DieResult | CustomDieResult): OneResult {
   return {
     type: 'one-result',
-    die
+    die,
   }
 }
 
@@ -18,11 +42,11 @@ export interface LiteralResult {
   result: number
 }
 
-export function literalResult (value: number, result: number): LiteralResult {
+export function literalResult(value: number, result: number): LiteralResult {
   return {
     type: 'literal-result',
     value,
-    result
+    result,
   }
 }
 
@@ -33,16 +57,16 @@ export interface DiceReduceResult {
   result: number
 }
 
-export function diceReduceResult (
+export function diceReduceResult(
   reduceables: DiceReduceableResult,
   reducer: DiceReducer,
-  result: number
+  result: number,
 ): DiceReduceResult {
   return {
     type: 'dice-reduce-result',
     reduceables,
     reducer,
-    result
+    result,
   }
 }
 
@@ -54,18 +78,18 @@ export interface BinaryOpResult {
   result: number
 }
 
-export function binaryOpResult (
+export function binaryOpResult(
   op: DiceBinOp,
   left: RollResult,
   right: RollResult,
-  result: number
+  result: number,
 ): BinaryOpResult {
   return {
     type: 'binary-op-result',
     op,
     left,
     right,
-    result
+    result,
   }
 }
 
@@ -76,16 +100,16 @@ export interface UnaryOpResult {
   result: number
 }
 
-export function unaryOpResult (
+export function unaryOpResult(
   op: DiceUnOp,
   expr: RollResult,
-  result: number
+  result: number,
 ): UnaryOpResult {
   return {
     type: 'unary-op-result',
     op,
     expr,
-    result
+    result,
   }
 }
 
@@ -101,10 +125,12 @@ export interface DiceExpressionsResult {
   rolls: RollResult[]
 }
 
-export function diceExpressionsResult (rolls: RollResult[]): DiceExpressionsResult {
+export function diceExpressionsResult(
+  rolls: RollResult[],
+): DiceExpressionsResult {
   return {
     type: 'dice-expressions-result',
-    rolls
+    rolls,
   }
 }
 
@@ -114,14 +140,14 @@ export interface DiceFilterableResult {
   filter: DiceFilter
 }
 
-export function diceFilterableResult (
+export function diceFilterableResult(
   rolls: DieResultFilter[],
-  filter: DiceFilter
+  filter: DiceFilter,
 ): DiceFilterableResult {
   return {
     type: 'dice-filterable-result',
     rolls,
-    filter
+    filter,
   }
 }
 
@@ -131,14 +157,14 @@ export interface DiceMapeableResult {
   functor: DiceFunctor
 }
 
-export function diceMapeableResult (
+export function diceMapeableResult(
   rolls: DiceResultMapped[],
-  functor: DiceFunctor
+  functor: DiceFunctor,
 ): DiceMapeableResult {
   return {
     type: 'dice-mapeable-result',
     rolls,
-    functor
+    functor,
   }
 }
 
@@ -152,10 +178,10 @@ export interface Rerolled {
   rerolls: DieResult[]
 }
 
-export function rerolled (rerolls: DieResult[]): Rerolled {
+export function rerolled(rerolls: DieResult[]): Rerolled {
   return {
     type: 'rerolled',
-    rerolls
+    rerolls,
   }
 }
 
@@ -164,10 +190,10 @@ export interface Exploded {
   explosions: DieResult[]
 }
 
-export function exploded (explosions: DieResult[]): Exploded {
+export function exploded(explosions: DieResult[]): Exploded {
   return {
     type: 'exploded',
-    explosions
+    explosions,
   }
 }
 
@@ -176,17 +202,24 @@ export interface Normal {
   roll: DieResult
 }
 
-export function normal (roll: DieResult): Normal {
+export function normal(roll: DieResult): Normal {
   return {
     type: 'normal',
-    roll
+    roll,
   }
 }
 
-export type DiceResultMapped =
-  | Rerolled
-  | Exploded
-  | Normal
+export interface Compounded {
+  type: 'compounded'
+  rolls: DieResult[]
+  total: number
+}
+
+export function compounded(rolls: DieResult[], total: number): Compounded {
+  return { type: 'compounded', rolls, total }
+}
+
+export type DiceResultMapped = Rerolled | Exploded | Normal | Compounded
 
 export interface DieResult {
   type: 'die-result'
@@ -194,11 +227,11 @@ export interface DieResult {
   sides: Sides
 }
 
-export function dieResult (result: number, sides: Sides): DieResult {
+export function dieResult(result: number, sides: Sides): DieResult {
   return {
     type: 'die-result',
     result,
-    sides
+    sides,
   }
 }
 
@@ -207,10 +240,10 @@ export interface KeepResult {
   roll: RollResult
 }
 
-export function keepResult (roll: RollResult): KeepResult {
+export function keepResult(roll: RollResult): KeepResult {
   return {
     type: 'keep-result',
-    roll
+    roll,
   }
 }
 
@@ -219,13 +252,11 @@ export interface DiscardResult {
   roll: RollResult
 }
 
-export function discardResult (roll: RollResult): DiscardResult {
+export function discardResult(roll: RollResult): DiscardResult {
   return {
     type: 'discard-result',
-    roll
+    roll,
   }
 }
 
-export type DieResultFilter =
-  | KeepResult
-  | DiscardResult
+export type DieResultFilter = KeepResult | DiscardResult
