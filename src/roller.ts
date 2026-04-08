@@ -427,6 +427,9 @@ export class Roller {
   }
 
   reduceResults(results: number[], reducer: DiceReducer): number {
+    if (typeof reducer === 'object' && reducer.type === 'count') {
+      return results.filter((r) => Roller.matchRange(r, reducer.threshold)).length
+    }
     switch (reducer) {
       case 'average':
         return Math.round(results.reduce((a, b) => a + b, 0) / results.length)
@@ -438,6 +441,8 @@ export class Roller {
         return Math.min(...results)
       case 'max':
         return Math.max(...results)
+      default:
+        throw new Error(`Unknown reducer: ${JSON.stringify(reducer)}`)
     }
   }
 

@@ -227,6 +227,9 @@ export const DE = {
   },
 
   expressionExtractorToString(reducer: DiceReducer): string {
+    if (typeof reducer === 'object' && reducer.type === 'count') {
+      return ` count ${DE.countThresholdToString(reducer.threshold)}`
+    }
     switch (reducer) {
       case 'sum':
         return ''
@@ -238,6 +241,23 @@ export const DE = {
         return ' average'
       case 'median':
         return ' median'
+      default:
+        throw new Error(`Unknown reducer: ${JSON.stringify(reducer)}`)
+    }
+  },
+
+  countThresholdToString(range: Range): string {
+    switch (range.type) {
+      case 'exact':
+        return `= ${range.value}`
+      case 'value-or-more':
+        return `>= ${range.value}`
+      case 'value-or-less':
+        return `<= ${range.value}`
+      case 'between':
+        return `${range.minInclusive}..${range.maxInclusive}`
+      case 'composite':
+        return range.ranges.map(DE.countThresholdToString).join(',')
     }
   },
 

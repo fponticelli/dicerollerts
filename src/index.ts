@@ -3,6 +3,8 @@ export {
   type DiceBinOp,
   type DiceUnOp,
   type DiceReducer,
+  type SimpleReducer,
+  type CountReducer,
   type LowHigh,
   always,
   between,

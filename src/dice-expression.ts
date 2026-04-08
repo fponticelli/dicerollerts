@@ -91,7 +91,14 @@ export function customDie(faces: number[]): CustomDie {
 
 export type DiceExpression = Die | Literal | DiceReduce | BinaryOp | UnaryOp | CustomDie
 
-export type DiceReducer = 'sum' | 'min' | 'max' | 'average' | 'median'
+export type SimpleReducer = 'sum' | 'min' | 'max' | 'average' | 'median'
+
+export interface CountReducer {
+  type: 'count'
+  threshold: Range
+}
+
+export type DiceReducer = SimpleReducer | CountReducer
 
 export interface DiceExpressions {
   type: 'dice-expressions'
