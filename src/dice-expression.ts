@@ -7,10 +7,10 @@ export interface Die {
   sides: number
 }
 
-export function die (sides: number): Die {
+export function die(sides: number): Die {
   return {
     type: 'die',
-    sides
+    sides,
   }
 }
 
@@ -19,10 +19,10 @@ export interface Literal {
   value: number
 }
 
-export function literal (value: number): Literal {
+export function literal(value: number): Literal {
   return {
     type: 'literal',
-    value
+    value,
   }
 }
 
@@ -32,14 +32,14 @@ export interface DiceReduce {
   reducer: DiceReducer
 }
 
-export function diceReduce (
+export function diceReduce(
   reduceable: DiceReduceable,
-  reducer: DiceReducer
+  reducer: DiceReducer,
 ): DiceReduce {
   return {
     type: 'dice-reduce',
     reduceable,
-    reducer
+    reducer,
   }
 }
 
@@ -50,16 +50,16 @@ export interface BinaryOp {
   right: DiceExpression
 }
 
-export function binaryOp (
+export function binaryOp(
   op: DiceBinOp,
   left: DiceExpression,
-  right: DiceExpression
+  right: DiceExpression,
 ): BinaryOp {
   return {
     type: 'binary-op',
     op,
     left,
-    right
+    right,
   }
 }
 
@@ -69,20 +69,15 @@ export interface UnaryOp {
   expr: DiceExpression
 }
 
-export function unaryOp (op: DiceUnOp, expr: DiceExpression): UnaryOp {
+export function unaryOp(op: DiceUnOp, expr: DiceExpression): UnaryOp {
   return {
     type: 'unary-op',
     op,
-    expr
+    expr,
   }
 }
 
-export type DiceExpression =
-  | Die
-  | Literal
-  | DiceReduce
-  | BinaryOp
-  | UnaryOp
+export type DiceExpression = Die | Literal | DiceReduce | BinaryOp | UnaryOp
 
 export type DiceReducer = 'sum' | 'min' | 'max' | 'average' | 'median'
 
@@ -91,10 +86,10 @@ export interface DiceExpressions {
   exprs: DiceExpression[]
 }
 
-export function diceExpressions (...exprs: DiceExpression[]): DiceExpressions {
+export function diceExpressions(...exprs: DiceExpression[]): DiceExpressions {
   return {
     type: 'dice-expressions',
-    exprs
+    exprs,
   }
 }
 
@@ -104,14 +99,14 @@ export interface DiceListWithFilter {
   filter: DiceFilter
 }
 
-export function diceListWithFilter (
+export function diceListWithFilter(
   list: DiceFilterable,
-  filter: DiceFilter
+  filter: DiceFilter,
 ): DiceListWithFilter {
   return {
     type: 'dice-list-with-filter',
     list,
-    filter
+    filter,
   }
 }
 
@@ -121,14 +116,14 @@ export interface DiceListWithMap {
   functor: DiceFunctor
 }
 
-export function diceListWithMap (
+export function diceListWithMap(
   dice: Sides[],
-  functor: DiceFunctor
+  functor: DiceFunctor,
 ): DiceListWithMap {
   return {
     type: 'dice-list-with-map',
     dice,
-    functor
+    functor,
   }
 }
 
@@ -142,10 +137,10 @@ export interface FilterableDiceArray {
   dice: Sides[]
 }
 
-export function filterableDiceArray (dice: Sides[]): FilterableDiceArray {
+export function filterableDiceArray(dice: Sides[]): FilterableDiceArray {
   return {
     type: 'filterable-dice-array',
-    dice
+    dice,
   }
 }
 
@@ -154,18 +149,16 @@ export interface FilterableDiceExpressions {
   exprs: DiceExpression[]
 }
 
-export function filterableDiceExpressions (
+export function filterableDiceExpressions(
   ...exprs: DiceExpression[]
 ): FilterableDiceExpressions {
   return {
     type: 'filterable-dice-expressions',
-    exprs
+    exprs,
   }
 }
 
-export type DiceFilterable =
-  | FilterableDiceArray
-  | FilterableDiceExpressions
+export type DiceFilterable = FilterableDiceArray | FilterableDiceExpressions
 
 export interface Drop {
   type: 'drop'
@@ -173,11 +166,11 @@ export interface Drop {
   value: number
 }
 
-export function drop (dir: LowHigh, value: number): Drop {
+export function drop(dir: LowHigh, value: number): Drop {
   return {
     type: 'drop',
     dir,
-    value
+    value,
   }
 }
 
@@ -187,17 +180,15 @@ export interface Keep {
   value: number
 }
 
-export function keep (dir: LowHigh, value: number): Keep {
+export function keep(dir: LowHigh, value: number): Keep {
   return {
     type: 'keep',
     dir,
-    value
+    value,
   }
 }
 
-export type DiceFilter =
-  | Drop
-  | Keep
+export type DiceFilter = Drop | Keep
 
 export interface Explode {
   type: 'explode'
@@ -205,11 +196,11 @@ export interface Explode {
   range: Range
 }
 
-export function explode (times: Times, range: Range): Explode {
+export function explode(times: Times, range: Range): Explode {
   return {
     type: 'explode',
     times,
-    range
+    range,
   }
 }
 
@@ -219,11 +210,11 @@ export interface Reroll {
   range: Range
 }
 
-export function reroll (times: Times, range: Range): Reroll {
+export function reroll(times: Times, range: Range): Reroll {
   return {
     type: 'reroll',
     times,
-    range
+    range,
   }
 }
 
@@ -233,29 +224,26 @@ export interface Emphasis {
   furthestFrom: number | 'average'
 }
 
-export function emphasis (
+export function emphasis(
   tieBreaker: 'high' | 'low' | 'reroll',
-  furthestFrom: number | 'average'
+  furthestFrom: number | 'average',
 ): Emphasis {
   return {
     type: 'emphasis',
     tieBreaker,
-    furthestFrom
+    furthestFrom,
   }
 }
 
-export type DiceFunctor =
-  | Explode
-  | Reroll
-  | Emphasis
+export type DiceFunctor = Explode | Reroll | Emphasis
 
 export interface Always {
   type: 'always'
 }
 
-export function always (): Always {
+export function always(): Always {
   return {
-    type: 'always'
+    type: 'always',
   }
 }
 
@@ -264,26 +252,24 @@ export interface UpTo {
   value: number
 }
 
-export function upTo (value: number): UpTo {
+export function upTo(value: number): UpTo {
   return {
     type: 'up-to',
-    value
+    value,
   }
 }
 
-export type Times =
-  | Always
-  | UpTo
+export type Times = Always | UpTo
 
 export interface Exact {
   type: 'exact'
   value: number
 }
 
-export function exact (value: number): Exact {
+export function exact(value: number): Exact {
   return {
     type: 'exact',
-    value
+    value,
   }
 }
 
@@ -293,14 +279,11 @@ export interface Between {
   maxInclusive: number
 }
 
-export function between (
-  minInclusive: number,
-  maxInclusive: number
-): Between {
+export function between(minInclusive: number, maxInclusive: number): Between {
   return {
     type: 'between',
     minInclusive,
-    maxInclusive
+    maxInclusive,
   }
 }
 
@@ -309,10 +292,10 @@ export interface ValueOrMore {
   value: number
 }
 
-export function valueOrMore (value: number): ValueOrMore {
+export function valueOrMore(value: number): ValueOrMore {
   return {
     type: 'value-or-more',
-    value
+    value,
   }
 }
 
@@ -321,10 +304,10 @@ export interface ValueOrLess {
   value: number
 }
 
-export function valueOrLess (value: number): ValueOrLess {
+export function valueOrLess(value: number): ValueOrLess {
   return {
     type: 'value-or-less',
-    value
+    value,
   }
 }
 
@@ -333,19 +316,14 @@ export interface Composite {
   ranges: Range[]
 }
 
-export function composite (ranges: Range[]): Composite {
+export function composite(ranges: Range[]): Composite {
   return {
     type: 'composite',
-    ranges
+    ranges,
   }
 }
 
-export type Range =
-  | Exact
-  | Between
-  | ValueOrMore
-  | ValueOrLess
-  | Composite
+export type Range = Exact | Between | ValueOrMore | ValueOrLess | Composite
 
 export type LowHigh = 'low' | 'high'
 
@@ -358,10 +336,10 @@ export interface InsufficientSides {
   sides: number
 }
 
-export function insufficientSides (sides: number): InsufficientSides {
+export function insufficientSides(sides: number): InsufficientSides {
   return {
     type: 'insufficient-sides',
-    sides
+    sides,
   }
 }
 
@@ -369,9 +347,9 @@ export interface EmptySet {
   type: 'empty-set'
 }
 
-export function emptySet (): EmptySet {
+export function emptySet(): EmptySet {
   return {
-    type: 'empty-set'
+    type: 'empty-set',
   }
 }
 
@@ -381,14 +359,11 @@ export interface InfiniteReroll {
   range: Range
 }
 
-export function infiniteReroll (
-  sides: number,
-  range: Range
-): InfiniteReroll {
+export function infiniteReroll(sides: number, range: Range): InfiniteReroll {
   return {
     type: 'infinite-reroll',
     sides,
-    range
+    range,
   }
 }
 
@@ -398,14 +373,11 @@ export interface TooManyDrops {
   toDrop: number
 }
 
-export function tooManyDrops (
-  available: number,
-  toDrop: number
-): TooManyDrops {
+export function tooManyDrops(available: number, toDrop: number): TooManyDrops {
   return {
     type: 'too-many-drops',
     available,
-    toDrop
+    toDrop,
   }
 }
 
@@ -415,14 +387,11 @@ export interface TooManyKeeps {
   toKeep: number
 }
 
-export function tooManyKeeps (
-  available: number,
-  toKeep: number
-): TooManyKeeps {
+export function tooManyKeeps(available: number, toKeep: number): TooManyKeeps {
   return {
     type: 'too-many-keeps',
     available,
-    toKeep
+    toKeep,
   }
 }
 
@@ -430,9 +399,9 @@ export interface DropOrKeepShouldBePositive {
   type: 'drop-or-keep-should-be-positive'
 }
 
-export function dropOrKeepShouldBePositive (): DropOrKeepShouldBePositive {
+export function dropOrKeepShouldBePositive(): DropOrKeepShouldBePositive {
   return {
-    type: 'drop-or-keep-should-be-positive'
+    type: 'drop-or-keep-should-be-positive',
   }
 }
 

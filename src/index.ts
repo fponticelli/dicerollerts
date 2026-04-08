@@ -1,6 +1,10 @@
 export { DE } from './dice-expression-domain'
 export {
-  type DiceBinOp, type DiceUnOp, type DiceReducer, type LowHigh, always,
+  type DiceBinOp,
+  type DiceUnOp,
+  type DiceReducer,
+  type LowHigh,
+  always,
   between,
   binaryOp,
   composite,
@@ -25,22 +29,25 @@ export {
   exact,
   upTo,
   valueOrLess,
-  valueOrMore
+  valueOrMore,
 } from './dice-expression'
 
 export type {
   Always,
   Between,
   BinaryOp,
-  Composite, DiceExpression,
+  Composite,
+  DiceExpression,
   DiceExpressions,
   DiceFunctor,
-  DiceReduce, Die,
+  DiceReduce,
+  Die,
   DiceFilter,
   DiceFilterable,
   DiceListWithFilter,
   DiceListWithMap,
-  DiceReduceable, Drop,
+  DiceReduceable,
+  Drop,
   DropOrKeepShouldBePositive,
   EmptySet,
   Exact,
@@ -51,7 +58,8 @@ export type {
   InfiniteReroll,
   InsufficientSides,
   Keep,
-  Literal, Range,
+  Literal,
+  Range,
   Reroll,
   Roll,
   Sides,
@@ -62,7 +70,7 @@ export type {
   ValidationMessage,
   UpTo,
   ValueOrLess,
-  ValueOrMore
+  ValueOrMore,
 } from './dice-expression'
 
 export { DiceParser } from './dice-parser'
@@ -101,7 +109,7 @@ export {
   normal,
   oneResult,
   rerolled,
-  unaryOpResult
+  unaryOpResult,
 } from './roll-result'
 
 export { Roller } from './roller'
