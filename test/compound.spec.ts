@@ -73,3 +73,44 @@ describe('compound exploding', () => {
     expect(DE.toString(expr)).toBe('d6 compound on 5 or more')
   })
 })
+
+import { DiceParser } from '../src/dice-parser'
+
+describe('compound parsing', () => {
+  test('parses compound once', () => {
+    const parsed = DiceParser.parse('d6 compound once on 6')
+    expect(parsed.isSuccess()).toBe(true)
+    if (parsed.isSuccess()) {
+      expect(DE.toString(parsed.value)).toBe('d6 compound once on 6')
+      expect(RR.getResult(minRoller().roll(parsed.value))).toBe(1)
+      expect(RR.getResult(maxRoller().roll(parsed.value))).toBe(12)
+    }
+  })
+
+  test('parses 3d6 compound once', () => {
+    const parsed = DiceParser.parse('3d6 compound once on 6')
+    expect(parsed.isSuccess()).toBe(true)
+    if (parsed.isSuccess()) {
+      expect(DE.toString(parsed.value)).toBe('3d6 compound once on 6')
+      expect(RR.getResult(minRoller().roll(parsed.value))).toBe(3)
+      expect(RR.getResult(maxRoller().roll(parsed.value))).toBe(36)
+    }
+  })
+
+  test('parses compound on impossible value', () => {
+    const parsed = DiceParser.parse('d6 compound on 7')
+    expect(parsed.isSuccess()).toBe(true)
+    if (parsed.isSuccess()) {
+      expect(RR.getResult(minRoller().roll(parsed.value))).toBe(1)
+      expect(RR.getResult(maxRoller().roll(parsed.value))).toBe(6)
+    }
+  })
+
+  test('parses ce shorthand', () => {
+    const parsed = DiceParser.parse('3d6ce6')
+    expect(parsed.isSuccess()).toBe(true)
+    if (parsed.isSuccess()) {
+      expect(DE.toString(parsed.value)).toBe('3d6 compound on 6 or more')
+    }
+  })
+})

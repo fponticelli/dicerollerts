@@ -29,6 +29,7 @@ import {
   diceListWithMap,
   explode,
   reroll,
+  compound,
   type DiceReduce,
   emphasis,
   customDie as makeCustomDie,
@@ -169,8 +170,12 @@ const diceFunctorConst = (
 const diceFunctor = lazy(() =>
   oneOf(
     emphasisConst,
+    diceFunctorConst('compound', compound),
     diceFunctorConst('explode', explode),
     diceFunctorConst('reroll', reroll),
+    match('ce')
+      .skipNext(OWS)
+      .pickNext(positive.map((v) => compound(always(), valueOrMore(v)))),
     matchChar('e')
       .skipNext(OWS)
       .pickNext(positive.map((v) => explode(always(), valueOrMore(v)))),
