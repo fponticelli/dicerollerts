@@ -104,6 +104,18 @@ function pickFurthest(
   }
 }
 
+export interface RollerOptions {
+  maxExplodeIterations: number
+  maxRerollIterations: number
+  maxEmphasisIterations: number
+}
+
+const DEFAULT_OPTIONS: RollerOptions = {
+  maxExplodeIterations: 100,
+  maxRerollIterations: 100,
+  maxEmphasisIterations: 100,
+}
+
 export class Roller {
   static matchRange(r: number, range: Range): boolean {
     switch (range.type) {
@@ -140,7 +152,14 @@ export class Roller {
     }
   }
 
-  constructor(private readonly dieRoll: Roll) {}
+  readonly options: RollerOptions
+
+  constructor(
+    private readonly dieRoll: Roll,
+    options?: Partial<RollerOptions>,
+  ) {
+    this.options = { ...DEFAULT_OPTIONS, ...options }
+  }
 
   private rollDiceReduce(dr: DiceReduce): RollResult {
     if (dr.reduceable.type === 'dice-expressions') {
@@ -265,7 +284,9 @@ export class Roller {
     switch (functor.type) {
       case 'explode':
         if (times.type === 'always') {
-          return rolls.map((roll) => this.explodeRoll(roll, -1, functor.range))
+          return rolls.map((roll) =>
+            this.explodeRoll(roll, this.options.maxExplodeIterations, functor.range),
+          )
         } else {
           return rolls.map((roll) =>
             this.explodeRoll(roll, times.value, functor.range),
@@ -273,7 +294,9 @@ export class Roller {
         }
       case 'reroll':
         if (times.type === 'always') {
-          return rolls.map((roll) => this.rerollRoll(roll, -1, functor.range))
+          return rolls.map((roll) =>
+            this.rerollRoll(roll, this.options.maxRerollIterations, functor.range),
+          )
         } else {
           return rolls.map((roll) =>
             this.rerollRoll(roll, times.value, functor.range),
@@ -291,7 +314,7 @@ export class Roller {
     const furthestValue =
       furthestFrom === 'average' ? Math.floor(roll.sides / 2) : furthestFrom
     let result = pickFurthest(rolls[0], rolls[1], furthestValue, tieBreaker)
-    for (let i = 0; i < 100; i++) {
+    for (let i = 0; i < this.options.maxEmphasisIterations; i++) {
       if (result !== 'tie') {
         break
       }
@@ -312,12 +335,14 @@ export class Roller {
   }
 
   explodeRoll(roll: DieResult, times: number, range: Range): DiceResultMapped {
-    const acc = this.rollRange(roll, times, range)
+    const limit = times === -1 ? this.options.maxExplodeIterations : times
+    const acc = this.rollRange(roll, limit, range)
     return acc.length === 1 ? normal(acc[0]) : exploded(acc)
   }
 
   rerollRoll(roll: DieResult, times: number, range: Range): DiceResultMapped {
-    const acc = this.rollRange(roll, times, range)
+    const limit = times === -1 ? this.options.maxRerollIterations : times
+    const acc = this.rollRange(roll, limit, range)
     return acc.length === 1 ? normal(acc[0]) : rerolled(acc)
   }
 

@@ -118,4 +118,4 @@ export {
   unaryOpResult,
 } from './roll-result'
 
-export { Roller } from './roller'
+export { Roller, type RollerOptions } from './roller'
