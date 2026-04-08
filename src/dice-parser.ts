@@ -197,43 +197,50 @@ const negate = lazy(() =>
 ) // .mapError(_ => 'negate')
 const unary = negate
 
-const binOpSymbol = oneOf(
-  PLUS.withResult('sum'),
-  MINUS.withResult('difference'),
-  MULTIPLICATION.withResult('multiplication'),
-  DIVISION.withResult('division'),
+const addSubSymbol = oneOf(
+  PLUS.withResult('sum' as const),
+  MINUS.withResult('difference' as const),
 )
 
-const opRight = OWS.pickNext(
-  binOpSymbol.flatMap((op) => {
+const mulDivSymbol = oneOf(
+  MULTIPLICATION.withResult('multiplication' as const),
+  DIVISION.withResult('division' as const),
+)
+
+const mulDivRight = OWS.pickNext(
+  mulDivSymbol.flatMap((op) => {
     return OWS.pickNext(termExpression.map((right) => ({ op, right })))
   }),
 )
 
+const mulDivExpr: Decoder<TextInput, DiceExpression, DecodeError> = lazy(() =>
+  termExpression.flatMap((left) => {
+    return mulDivRight.atLeast(1).map((a) => {
+      return a.reduce(
+        (acc: DiceExpression, item) => binaryOp(item.op, acc, item.right),
+        left,
+      )
+    })
+  }),
+)
+
+const addSubFactor: Decoder<TextInput, DiceExpression, DecodeError> = lazy(
+  () => oneOf(mulDivExpr, termExpression),
+)
+
+const addSubRight = OWS.pickNext(
+  addSubSymbol.flatMap((op) => {
+    return OWS.pickNext(addSubFactor.map((right) => ({ op, right })))
+  }),
+)
+
 const binop = lazy(() => {
-  return termExpression.flatMap((left) => {
-    return opRight.atLeast(1).map((a) => {
-      return a.reduce((left: DiceExpression, item) => {
-        switch (item.op) {
-          case 'sum':
-          case 'difference':
-            return binaryOp(item.op, left, item.right)
-          case 'division':
-          case 'multiplication':
-            switch (left.type) {
-              case 'binary-op':
-                return binaryOp(
-                  left.op,
-                  left.left,
-                  binaryOp(item.op, left.right, item.right),
-                )
-              default:
-                return binaryOp(item.op, left, item.right)
-            }
-          default:
-            throw new Error('unreachable')
-        }
-      }, left)
+  return addSubFactor.flatMap((left) => {
+    return addSubRight.atLeast(1).map((a) => {
+      return a.reduce(
+        (acc: DiceExpression, item) => binaryOp(item.op, acc, item.right),
+        left,
+      )
     })
   })
 })
@@ -357,7 +364,7 @@ const termExpression = lazy(
 )
 
 const expression = lazy((): Decoder<TextInput, DiceExpression, DecodeError> => {
-  return oneOf(binop, termExpression)
+  return oneOf(binop, addSubFactor)
 }).withFailure(new CustomError('expression'))
 
 const grammar: Decoder<TextInput, DiceExpression, DecodeError> = OWS.pickNext(

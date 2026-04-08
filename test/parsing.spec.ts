@@ -59,9 +59,9 @@ const testObjects: TestObject[] = [
 
   { min: 4, t: '100 / 25' },
   { min: 75, t: '25 * 3' },
-  { min: 2, t: '150 / 25 * 3' }, // precedence might not be correct
+  { min: 18, t: '150 / 25 * 3' },
   { min: 18, t: '(150 / 25) * 3' },
-  { min: 11, max: 105, t: '((2,d4,3d8),5) * (d4,3d8) / (3,d6)' },
+  { min: 11, max: 108, t: '((2,d4,3d8),5) * (d4,3d8) / (3,d6)' },
 
   { min: 10, max: 60, t: '10d6' },
   { min: 10, max: 60, t: '10d6 sum', p: '10d6' },
