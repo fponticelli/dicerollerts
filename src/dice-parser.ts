@@ -32,6 +32,7 @@ import {
   reroll,
   compound,
   type DiceReduce,
+  type DiceFilterable,
   emphasis,
   customDie as makeCustomDie,
 } from './dice-expression'
@@ -372,13 +373,24 @@ const diceFilterable = lazy(
   (): Decoder<TextInput, DiceReduceable, DecodeError> => {
     return oneOf(
       positive.flatMap((rolls) => {
+        return D.skipNext(matchChar('F')).withResult(
+          filterableDiceExpressions(
+            ...Array.from({ length: rolls }, () => makeCustomDie([-1, 0, 1])),
+          ) as DiceFilterable,
+        )
+      }),
+      positive.flatMap((rolls) => {
         return die.map((sides) => {
           const dice = [...Array(rolls)].map((_) => sides)
-          return filterableDiceArray(dice)
+          return filterableDiceArray(dice) as DiceFilterable
         })
       }),
-      commaSeparated(die).map((dice) => filterableDiceArray(dice)),
-      commaSeparated(expression).map((v) => filterableDiceExpressions(...v)),
+      commaSeparated(die).map(
+        (dice) => filterableDiceArray(dice) as DiceFilterable,
+      ),
+      commaSeparated(expression).map(
+        (v) => filterableDiceExpressions(...v) as DiceFilterable,
+      ),
     ).flatMap((filterable) => {
       return OWS.pickNext(
         oneOf(

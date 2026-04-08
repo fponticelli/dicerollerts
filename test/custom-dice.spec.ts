@@ -87,6 +87,14 @@ describe('custom die parsing', () => {
       { input: '4dF', rendered: '4dF', min: -4, max: 4 },
       { input: 'dF + 3', rendered: 'dF + 3', min: 2, max: 4 },
       { input: 'd{2,4,6} + 1', rendered: 'd{2,4,6} + 1', min: 3, max: 7 },
+      { input: '4dF keep 2', rendered: '4dF keep 2', min: -2, max: 2 },
+      { input: '4dF drop 1', rendered: '4dF drop 1', min: -3, max: 3 },
+      {
+        input: '4dF keep lowest 1',
+        rendered: '4dF keep lowest 1',
+        min: -1,
+        max: 1,
+      },
     ]
 
   test.each(cases)('parses $input', ({ input, rendered, min, max }) => {
