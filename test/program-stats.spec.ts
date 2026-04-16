@@ -474,6 +474,94 @@ describe('FieldStats - array aggregate', () => {
   })
 })
 
+describe('FieldStats - mode and variance', () => {
+  test('numeric stats include mode', () => {
+    const prog = parseProgram('`d6`')
+    const result = ProgramStats.analyze(prog)
+    if (result.stats.type === 'number') {
+      // d6 is uniform - all values are mode
+      expect(result.stats.mode.length).toBe(6)
+    }
+  })
+
+  test('mode for skewed distribution', () => {
+    const prog = parseProgram('`2d6`')
+    const result = ProgramStats.analyze(prog)
+    if (result.stats.type === 'number') {
+      // 2d6 mode is 7
+      expect(result.stats.mode).toEqual([7])
+    }
+  })
+
+  test('variance is stddev squared', () => {
+    const prog = parseProgram('`d6`')
+    const result = ProgramStats.analyze(prog)
+    if (result.stats.type === 'number') {
+      expect(result.stats.variance).toBeCloseTo(result.stats.stddev ** 2, 5)
+    }
+  })
+})
+
+describe('FieldStats - sorted string frequencies', () => {
+  test('frequencies iterate most common first', () => {
+    const prog = parseProgram('if `d20` >= 2 then "common" else "rare"')
+    const result = ProgramStats.analyze(prog)
+    if (result.stats.type === 'string') {
+      const keys = [...result.stats.frequencies.keys()]
+      expect(keys[0]).toBe('common')
+      expect(keys[1]).toBe('rare')
+    }
+  })
+})
+
+describe('FieldStats - normalization', () => {
+  test('distribution sums to exactly 1', () => {
+    const prog = parseProgram('`d6` + `d6`')
+    const result = ProgramStats.analyze(prog)
+    if (result.stats.type === 'number') {
+      let total = 0
+      for (const p of result.stats.distribution.values()) total += p
+      expect(total).toBeCloseTo(1, 14)
+    }
+  })
+
+  test('cdf max equals 1 exactly', () => {
+    const prog = parseProgram('`d6`')
+    const result = ProgramStats.analyze(prog)
+    if (result.stats.type === 'number') {
+      expect(result.stats.cdf.get(6)).toBe(1)
+    }
+  })
+})
+
+describe('AnalyzeResult diagnostics', () => {
+  test('diagnostics populated', () => {
+    const prog = parseProgram('`d6`')
+    const result = ProgramStats.analyze(prog)
+    expect(result.diagnostics).toBeDefined()
+    expect(result.diagnostics.classifyTimeMs).toBeGreaterThanOrEqual(0)
+    expect(result.diagnostics.analyzeTimeMs).toBeGreaterThanOrEqual(0)
+    expect(result.diagnostics.fellBackToMC).toBe(false)
+  })
+
+  test('fellBackToMC tracked', () => {
+    // Hard to construct a case where classifier says exact but it fails;
+    // just verify the field exists and is false in normal cases
+    const prog = parseProgram('`d6`')
+    const result = ProgramStats.analyze(prog)
+    expect(result.diagnostics.fellBackToMC).toBe(false)
+  })
+
+  test('constant tier also has diagnostics', () => {
+    const prog = parseProgram('5 + 3')
+    const result = ProgramStats.analyze(prog)
+    expect(result.diagnostics).toBeDefined()
+    expect(result.diagnostics.classifyTimeMs).toBeGreaterThanOrEqual(0)
+    expect(result.diagnostics.analyzeTimeMs).toBeGreaterThanOrEqual(0)
+    expect(result.diagnostics.fellBackToMC).toBe(false)
+  })
+})
+
 describe('histogram utilities', () => {
   test('suggestBucketSize for small range', () => {
     expect(suggestBucketSize(1, 6)).toBe(1)

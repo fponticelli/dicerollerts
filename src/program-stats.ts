@@ -9,6 +9,21 @@ import type {
 import { Evaluator } from './evaluator'
 import { DiceStats } from './dice-stats'
 
+// Minimal ambient type for AbortSignal (not in ESNext lib without DOM).
+type AbortSignal = { readonly aborted: boolean }
+
+// Use performance.now() when available (browser/Node >=16), else Date.now().
+const perfNow: () => number = (() => {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const p = (globalThis as any).performance
+    if (p && typeof p.now === 'function') return () => p.now() as number
+  } catch {
+    // ignore
+  }
+  return () => Date.now()
+})()
+
 export interface Percentiles {
   p5: number
   p10: number
@@ -35,6 +50,8 @@ export type FieldStats =
       type: 'number'
       mean: number
       stddev: number
+      variance: number
+      mode: number[]
       min: number
       max: number
       distribution: Map<number, number>
@@ -66,12 +83,20 @@ export interface AnalysisStrategy {
   converged?: boolean
 }
 
+export interface AnalyzeDiagnostics {
+  classifyTimeMs: number
+  analyzeTimeMs: number
+  jointSizeMax?: number
+  fellBackToMC: boolean
+}
+
 export interface AnalyzeResult {
   stats: FieldStats
   strategy: AnalysisStrategy
+  diagnostics: AnalyzeDiagnostics
 }
 
-interface AnalyzeOptions {
+export interface AnalyzeOptions {
   // Legacy fixed-trial option (still respected as a maxTrials cap when given)
   trials?: number
   maxTrials?: number
@@ -79,6 +104,25 @@ interface AnalyzeOptions {
   batchSize?: number
   targetRelativeError?: number
   targetBinStderr?: number
+  // Optional cancellation. The Monte Carlo loop checks `signal.aborted`
+  // between batches; if set, it throws `DOMException('Aborted', 'AbortError')`.
+  signal?: AbortSignal
+}
+
+export interface AnalyzeAsyncOptions extends AnalyzeOptions {
+  // Emit progress every N trials. Defaults to `batchSize`.
+  yieldEvery?: number
+}
+
+export interface AsyncProgress {
+  // Current snapshot of the stats computed from trials so far. For the
+  // `constant` and `exact` tiers this is the final stats.
+  stats: FieldStats
+  // Number of Monte Carlo trials completed so far. 0 for non-MC tiers.
+  trials: number
+  // Whether the convergence threshold has been met. Always true for the
+  // `constant` and `exact` tiers.
+  converged: boolean
 }
 
 const DEFAULT_MAX_TRIALS = 100000
@@ -97,29 +141,102 @@ export const ProgramStats = {
   },
 
   analyze(program: Program, options?: AnalyzeOptions): AnalyzeResult {
+    const t0 = perfNow()
+    const analysis = analyzeProgram(program)
+    const classifyTimeMs = perfNow() - t0
+
+    if (!analysis.random) {
+      const t1 = perfNow()
+      const evaluator = makeEvaluator()
+      const value = evaluator.run(program)
+      const analyzeTimeMs = perfNow() - t1
+      return {
+        stats: constantStats(value),
+        strategy: { tier: 'constant' },
+        diagnostics: { classifyTimeMs, analyzeTimeMs, fellBackToMC: false },
+      }
+    }
+
+    if (analysis.exactDist !== null) {
+      const t1 = perfNow()
+      const stats = analysis.exactDist()
+      const analyzeTimeMs = perfNow() - t1
+      if (stats !== null) {
+        return {
+          stats,
+          strategy: { tier: 'exact' },
+          diagnostics: { classifyTimeMs, analyzeTimeMs, fellBackToMC: false },
+        }
+      }
+      // Exact was attempted but failed — fall back to MC
+      const mcResult = runMonteCarlo(program, options)
+      return {
+        ...mcResult,
+        diagnostics: {
+          classifyTimeMs,
+          analyzeTimeMs: mcResult.diagnostics.analyzeTimeMs,
+          fellBackToMC: true,
+        },
+      }
+    }
+
+    const mcResult = runMonteCarlo(program, options)
+    return {
+      ...mcResult,
+      diagnostics: {
+        classifyTimeMs,
+        analyzeTimeMs: mcResult.diagnostics.analyzeTimeMs,
+        fellBackToMC: false,
+      },
+    }
+  },
+
+  async *analyzeAsync(
+    program: Program,
+    options?: AnalyzeAsyncOptions,
+  ): AsyncGenerator<AsyncProgress> {
+    throwIfAborted(options?.signal)
     const analysis = analyzeProgram(program)
 
     if (!analysis.random) {
       const evaluator = makeEvaluator()
       const value = evaluator.run(program)
-      return {
+      yield {
         stats: constantStats(value),
-        strategy: { tier: 'constant' },
+        trials: 0,
+        converged: true,
       }
+      return
     }
 
     if (analysis.exactDist !== null) {
       const stats = analysis.exactDist()
       if (stats !== null) {
-        return {
-          stats,
-          strategy: { tier: 'exact' },
-        }
+        yield { stats, trials: 0, converged: true }
+        return
       }
+      // Exact failed — fall through to streaming MC.
     }
 
-    return runMonteCarlo(program, options)
+    yield* runMonteCarloAsync(program, options)
   },
+}
+
+function throwIfAborted(signal: AbortSignal | undefined): void {
+  if (signal?.aborted) {
+    throw makeAbortError()
+  }
+}
+
+function makeAbortError(): Error {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const DE = (globalThis as any).DOMException
+  if (typeof DE !== 'undefined') {
+    return new DE('Aborted', 'AbortError') as Error
+  }
+  const err = new Error('Aborted')
+  err.name = 'AbortError'
+  return err
 }
 
 // ---------------------------------------------------------------------------
@@ -724,8 +841,9 @@ function symDistToFieldStats(sd: SymDist<SymValue>): FieldStats | null {
     return { type: 'boolean', truePercent }
   }
   // string
-  const frequencies = new Map<string, number>()
-  for (const [v, p] of sd.dist) frequencies.set(v as string, p)
+  const rawFreq = new Map<string, number>()
+  for (const [v, p] of sd.dist) rawFreq.set(v as string, p)
+  const frequencies = sortFrequenciesDesc(normalizeMap(rawFreq))
   return { type: 'string', frequencies }
 }
 
@@ -1322,6 +1440,8 @@ function constantStats(value: Value): FieldStats {
       type: 'number',
       mean: value,
       stddev: 0,
+      variance: 0,
+      mode: [value],
       min: value,
       max: value,
       distribution,
@@ -1366,17 +1486,6 @@ function constantStats(value: Value): FieldStats {
 // ---------------------------------------------------------------------------
 // Distribution helpers (CDF, percentiles, moments, aggregate, binning)
 // ---------------------------------------------------------------------------
-
-function computeCdf(dist: Map<number, number>): Map<number, number> {
-  const sortedKeys = [...dist.keys()].sort((a, b) => a - b)
-  const cdf = new Map<number, number>()
-  let cum = 0
-  for (const k of sortedKeys) {
-    cum += dist.get(k)!
-    cdf.set(k, cum)
-  }
-  return cdf
-}
 
 function percentileFromCdf(cdf: Map<number, number>, p: number): number {
   const sortedEntries = [...cdf.entries()].sort((a, b) => a[0] - b[0])
@@ -1462,14 +1571,15 @@ function computeAggregateIfNumeric(
   }
   const variance = Math.max(0, pooledExSq - pooledMean * pooledMean)
   const stddev = Math.sqrt(variance)
-  const cdf = computeCdf(pooled)
+  const distribution = normalizeMap(pooled)
+  const cdf = buildCdf(distribution)
   const percentiles = computePercentiles(cdf)
   return {
     mean: pooledMean,
     stddev,
     min,
     max,
-    distribution: pooled,
+    distribution,
     cdf,
     percentiles,
     count: n,
@@ -1516,33 +1626,82 @@ export function binDistribution(
 }
 
 // ---------------------------------------------------------------------------
+// Distribution normalization and sorting helpers
+// ---------------------------------------------------------------------------
+
+function normalizeMap<T>(m: Map<T, number>): Map<T, number> {
+  let total = 0
+  for (const v of m.values()) total += v
+  if (total === 0 || total === 1) return m
+  const result = new Map<T, number>()
+  for (const [k, v] of m) result.set(k, v / total)
+  return result
+}
+
+function sortFrequenciesDesc(freqs: Map<string, number>): Map<string, number> {
+  const sorted = [...freqs.entries()].sort((a, b) => b[1] - a[1])
+  return new Map(sorted)
+}
+
+function computeMode(dist: Map<number, number>): number[] {
+  let maxProb = -Infinity
+  for (const p of dist.values()) {
+    if (p > maxProb) maxProb = p
+  }
+  const modes: number[] = []
+  for (const [v, p] of dist) {
+    if (p === maxProb) modes.push(v)
+  }
+  return modes.sort((a, b) => a - b)
+}
+
+// Rebuild CDF from a (normalized) distribution.
+function buildCdf(dist: Map<number, number>): Map<number, number> {
+  const sortedKeys = [...dist.keys()].sort((a, b) => a - b)
+  const cdf = new Map<number, number>()
+  let cum = 0
+  const lastIdx = sortedKeys.length - 1
+  for (let i = 0; i < sortedKeys.length; i++) {
+    const k = sortedKeys[i]
+    cum += dist.get(k)!
+    // Force exact 1 on the last key to avoid floating-point drift.
+    cdf.set(k, i === lastIdx ? 1 : cum)
+  }
+  return cdf
+}
+
+// ---------------------------------------------------------------------------
 // Exact tier helpers
 // ---------------------------------------------------------------------------
 
 function numberStatsFromDistribution(dist: Map<number, number>): FieldStats {
+  // Normalize first so probabilities sum to exactly 1.
+  const distribution = normalizeMap(new Map<number, number>(dist))
+
   let mean = 0
   let min = Infinity
   let max = -Infinity
-  for (const [v, p] of dist) {
+  for (const [v, p] of distribution) {
     mean += v * p
     if (v < min) min = v
     if (v > max) max = v
   }
   let variance = 0
-  for (const [v, p] of dist) {
+  for (const [v, p] of distribution) {
     variance += (v - mean) ** 2 * p
   }
-  const distribution = new Map<number, number>()
-  for (const [k, p] of dist) distribution.set(k, p)
   const stddev = Math.sqrt(variance)
-  const cdf = computeCdf(distribution)
+  const cdf = buildCdf(distribution)
   const percentiles = computePercentiles(cdf)
   const skewness = computeSkewness(distribution, mean, stddev)
   const kurtosis = computeKurtosis(distribution, mean, stddev)
+  const mode = computeMode(distribution)
   return {
     type: 'number',
     mean,
     stddev,
+    variance,
+    mode,
     min,
     max,
     distribution,
@@ -1560,6 +1719,8 @@ function cloneFieldStats(stats: FieldStats): FieldStats {
         type: 'number',
         mean: stats.mean,
         stddev: stats.stddev,
+        variance: stats.variance,
+        mode: stats.mode.slice(),
         min: stats.min,
         max: stats.max,
         distribution: new Map(stats.distribution),
@@ -1642,6 +1803,7 @@ function runMonteCarlo(
   program: Program,
   options?: AnalyzeOptions,
 ): AnalyzeResult {
+  const t0 = perfNow()
   const explicitTrials = options?.trials
   const maxTrials = options?.maxTrials ?? explicitTrials ?? DEFAULT_MAX_TRIALS
   const minTrialsRaw = options?.minTrials ?? DEFAULT_MIN_TRIALS
@@ -1669,6 +1831,11 @@ function runMonteCarlo(
     return {
       stats: buildStats(results, total),
       strategy: { tier: 'monte-carlo', trials: total, converged: false },
+      diagnostics: {
+        classifyTimeMs: 0,
+        analyzeTimeMs: perfNow() - t0,
+        fellBackToMC: false,
+      },
     }
   }
 
@@ -1706,6 +1873,11 @@ function runMonteCarlo(
   return {
     stats: buildStats(results, total),
     strategy: { tier: 'monte-carlo', trials: total, converged },
+    diagnostics: {
+      classifyTimeMs: 0,
+      analyzeTimeMs: perfNow() - t0,
+      fellBackToMC: false,
+    },
   }
 }
 
@@ -1867,27 +2039,32 @@ function buildNumberStats(values: number[], trialCount: number): FieldStats {
 
   const mean = sum / n
 
-  let variance = 0
+  let varianceRaw = 0
   for (const v of values) {
-    variance += (v - mean) ** 2
+    varianceRaw += (v - mean) ** 2
   }
-  const stddev = Math.sqrt(variance / n)
+  const variance = varianceRaw / n
+  const stddev = Math.sqrt(variance)
 
-  const distribution = new Map<number, number>()
+  const rawDist = new Map<number, number>()
   for (const [k, count] of counts) {
-    distribution.set(k, count / n)
+    rawDist.set(k, count / n)
   }
 
-  const cdf = computeCdf(distribution)
+  const distribution = normalizeMap(rawDist)
+  const cdf = buildCdf(distribution)
   const percentiles = computePercentiles(cdf)
   const skewness = computeSkewness(distribution, mean, stddev)
   const kurtosis = computeKurtosis(distribution, mean, stddev)
   const standardError = trialCount > 0 ? stddev / Math.sqrt(trialCount) : 0
+  const mode = computeMode(distribution)
 
   return {
     type: 'number',
     mean,
     stddev,
+    variance,
+    mode,
     min,
     max,
     distribution,
@@ -1914,10 +2091,12 @@ function buildStringStats(values: string[], trialCount: number): FieldStats {
   for (const v of values) {
     counts.set(v, (counts.get(v) ?? 0) + 1)
   }
-  const frequencies = new Map<string, number>()
+  const rawFreq = new Map<string, number>()
   for (const [k, count] of counts) {
-    frequencies.set(k, count / values.length)
+    rawFreq.set(k, count / values.length)
   }
+  const frequencies = sortFrequenciesDesc(normalizeMap(rawFreq))
+  // Build standardErrors in the same key order as frequencies.
   const standardErrors = new Map<string, number>()
   for (const [k, f] of frequencies) {
     standardErrors.set(
@@ -1955,4 +2134,64 @@ function buildRecordStats(
     fields[key] = buildStats(column, trialCount)
   }
   return { type: 'record', fields }
+}
+
+// ---------------------------------------------------------------------------
+// Async Monte Carlo (streaming progress)
+// ---------------------------------------------------------------------------
+
+async function* runMonteCarloAsync(
+  program: Program,
+  options?: AnalyzeAsyncOptions,
+): AsyncGenerator<AsyncProgress> {
+  const explicitTrials = options?.trials
+  const maxTrials = options?.maxTrials ?? explicitTrials ?? DEFAULT_MAX_TRIALS
+  const minTrialsRaw = options?.minTrials ?? DEFAULT_MIN_TRIALS
+  const minTrials = Math.min(minTrialsRaw, maxTrials)
+  const batchSizeRaw = options?.batchSize ?? DEFAULT_BATCH_SIZE
+  const batchSize = Math.max(1, Math.min(batchSizeRaw, maxTrials))
+  const targetRelativeError =
+    options?.targetRelativeError ?? DEFAULT_TARGET_REL_ERROR
+  const targetBinStderr = options?.targetBinStderr ?? DEFAULT_TARGET_BIN_STDERR
+  const yieldEvery = options?.yieldEvery ?? batchSize
+  const fixedTrials =
+    explicitTrials !== undefined && options?.maxTrials === undefined
+      ? explicitTrials
+      : null
+
+  const results: Value[] = []
+  let total = 0
+  let converged = false
+  const evaluator = makeEvaluator()
+  const config: ConvergenceConfig = {
+    targetRelativeError,
+    targetBinStderr,
+    minTrials,
+  }
+
+  const totalGoal = fixedTrials ?? maxTrials
+
+  while (total < totalGoal) {
+    throwIfAborted(options?.signal)
+    const target = Math.min(total + batchSize, totalGoal)
+    while (total < target) {
+      results.push(evaluator.run(program))
+      total++
+    }
+    if (
+      fixedTrials === null &&
+      total >= minTrials &&
+      hasConverged(results, config)
+    ) {
+      converged = true
+    }
+    if (total % yieldEvery === 0 || total >= totalGoal || converged) {
+      yield { stats: buildStats(results, total), trials: total, converged }
+    }
+    if (converged) break
+  }
+
+  if (!converged) {
+    yield { stats: buildStats(results, total), trials: total, converged: false }
+  }
 }

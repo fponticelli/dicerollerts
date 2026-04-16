@@ -190,3 +190,13 @@ export {
   type AnalyzeResult,
 } from './program-stats'
 export { ProgramParser, type ParseProgramResult } from './program-parser'
+export {
+  fieldStatsToJSON,
+  fieldStatsFromJSON,
+  totalVariationDistance,
+  klDivergence,
+  probabilityGreaterThan,
+  sampleFromDistribution,
+  fieldFromRecord,
+  elementFromArray,
+} from './program-stats-utils'
