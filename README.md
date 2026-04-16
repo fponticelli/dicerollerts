@@ -317,6 +317,50 @@ const bucketSize = suggestBucketSize(stats.min, stats.max, 100)
 const binned = binDistribution(stats.distribution, bucketSize)
 ```
 
+### Async analysis with cancellation
+
+```ts
+const controller = new AbortController()
+
+for await (const progress of ProgramStats.analyzeAsync(program, {
+  signal: controller.signal,
+  yieldEvery: 1000,
+})) {
+  // progress.stats, progress.trials, progress.converged
+  updateUI(progress)
+}
+```
+
+### Stats utilities
+
+```ts
+import {
+  fieldStatsToJSON,
+  fieldStatsFromJSON, // JSON round-trip (Maps preserved)
+  totalVariationDistance,
+  klDivergence, // distribution comparison
+  probabilityGreaterThan, // P(X > Y) for independent X, Y
+  sampleFromDistribution, // sample from a distribution
+  fieldFromRecord,
+  elementFromArray, // accessor helpers
+} from 'dicerollerts'
+```
+
+### Distribution algebra (lower-level API)
+
+For building custom analysis pipelines without the program language:
+
+```ts
+import { Distribution } from 'dicerollerts'
+
+const d6 = Distribution.uniform([1, 2, 3, 4, 5, 6])
+const sum2d6 = Distribution.add(d6, d6)
+const hit = Distribution.greaterOrEqualConst(sum2d6, 8)
+// Distribution.{singleton, uniform, from, fromWeights, map, combine,
+//  conditional, add, subtract, multiply, negate, and, or, not,
+//  greaterThan/Equal..., repeat, mean, variance, fromDiceExpression}
+```
+
 ## Building Expressions Programmatically
 
 ```ts
