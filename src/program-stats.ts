@@ -1799,17 +1799,27 @@ interface ConvergenceConfig {
   minTrials: number
 }
 
-function runMonteCarlo(
-  program: Program,
-  options?: AnalyzeOptions,
-): AnalyzeResult {
-  const t0 = perfNow()
+interface MonteCarloPlan {
+  fixedTrials: number | null
+  maxTrials: number
+  minTrials: number
+  batchSize: number
+  yieldEvery: number
+  config: ConvergenceConfig
+  signal: AbortSignal | undefined
+}
+
+function planMonteCarlo(
+  options: AnalyzeAsyncOptions | undefined,
+): MonteCarloPlan {
   const explicitTrials = options?.trials
   const maxTrials = options?.maxTrials ?? explicitTrials ?? DEFAULT_MAX_TRIALS
   const minTrialsRaw = options?.minTrials ?? DEFAULT_MIN_TRIALS
   const minTrials = Math.min(minTrialsRaw, maxTrials)
   const batchSizeRaw = options?.batchSize ?? DEFAULT_BATCH_SIZE
   const batchSize = Math.max(1, Math.min(batchSizeRaw, maxTrials))
+  const yieldEveryRaw = options?.yieldEvery ?? batchSize
+  const yieldEvery = Math.max(1, yieldEveryRaw)
   const targetRelativeError =
     options?.targetRelativeError ?? DEFAULT_TARGET_REL_ERROR
   const targetBinStderr = options?.targetBinStderr ?? DEFAULT_TARGET_BIN_STDERR
@@ -1817,17 +1827,38 @@ function runMonteCarlo(
     explicitTrials !== undefined && options?.maxTrials === undefined
       ? explicitTrials
       : null
+  return {
+    fixedTrials,
+    maxTrials,
+    minTrials,
+    batchSize,
+    yieldEvery,
+    config: { targetRelativeError, targetBinStderr, minTrials },
+    signal: options?.signal,
+  }
+}
+
+function runMonteCarlo(
+  program: Program,
+  options?: AnalyzeOptions,
+): AnalyzeResult {
+  const t0 = perfNow()
+  const plan = planMonteCarlo(options)
+  throwIfAborted(plan.signal)
 
   const results: Value[] = []
   let total = 0
   let converged = false
+  const evaluator = makeEvaluator()
 
-  if (fixedTrials !== null) {
-    const evaluator = makeEvaluator()
-    for (let i = 0; i < fixedTrials; i++) {
+  if (plan.fixedTrials !== null) {
+    for (let i = 0; i < plan.fixedTrials; i++) {
       results.push(evaluator.run(program))
+      total++
+      if (total % plan.batchSize === 0) {
+        throwIfAborted(plan.signal)
+      }
     }
-    total = fixedTrials
     return {
       stats: buildStats(results, total),
       strategy: { tier: 'monte-carlo', trials: total, converged: false },
@@ -1839,34 +1870,29 @@ function runMonteCarlo(
     }
   }
 
-  const evaluator = makeEvaluator()
-  const config: ConvergenceConfig = {
-    targetRelativeError,
-    targetBinStderr,
-    minTrials,
-  }
-
-  while (total < minTrials) {
-    const target = Math.min(total + batchSize, minTrials)
+  while (total < plan.minTrials) {
+    const target = Math.min(total + plan.batchSize, plan.minTrials)
     while (total < target) {
       results.push(evaluator.run(program))
       total++
     }
+    throwIfAborted(plan.signal)
   }
 
-  while (total < maxTrials) {
-    if (hasConverged(results, config)) {
+  while (total < plan.maxTrials) {
+    if (hasConverged(results, plan.config)) {
       converged = true
       break
     }
-    const target = Math.min(total + batchSize, maxTrials)
+    const target = Math.min(total + plan.batchSize, plan.maxTrials)
     while (total < target) {
       results.push(evaluator.run(program))
       total++
     }
+    throwIfAborted(plan.signal)
   }
 
-  if (!converged && hasConverged(results, config)) {
+  if (!converged && hasConverged(results, plan.config)) {
     converged = true
   }
 
@@ -1878,6 +1904,59 @@ function runMonteCarlo(
       analyzeTimeMs: perfNow() - t0,
       fellBackToMC: false,
     },
+  }
+}
+
+async function* runMonteCarloAsync(
+  program: Program,
+  options?: AnalyzeAsyncOptions,
+): AsyncGenerator<AsyncProgress> {
+  const plan = planMonteCarlo(options)
+  throwIfAborted(plan.signal)
+
+  const results: Value[] = []
+  let total = 0
+  const evaluator = makeEvaluator()
+
+  if (plan.fixedTrials !== null) {
+    let nextYield = plan.yieldEvery
+    for (let i = 0; i < plan.fixedTrials; i++) {
+      results.push(evaluator.run(program))
+      total++
+      if (total >= nextYield || total === plan.fixedTrials) {
+        throwIfAborted(plan.signal)
+        const stats = buildStats(results, total)
+        yield { stats, trials: total, converged: false }
+        nextYield = total + plan.yieldEvery
+      }
+    }
+    return
+  }
+
+  let nextYield = plan.yieldEvery
+
+  while (total < plan.maxTrials) {
+    const target = Math.min(total + plan.batchSize, plan.maxTrials)
+    while (total < target) {
+      results.push(evaluator.run(program))
+      total++
+    }
+
+    throwIfAborted(plan.signal)
+
+    if (total >= nextYield || total >= plan.maxTrials) {
+      const meetsMin = total >= plan.minTrials
+      const converged = meetsMin && hasConverged(results, plan.config)
+      const stats = buildStats(results, total)
+      yield { stats, trials: total, converged }
+      nextYield = total + plan.yieldEvery
+      if (converged) return
+    } else if (total >= plan.minTrials && hasConverged(results, plan.config)) {
+      // Convergence reached between yield points — emit a final progress.
+      const stats = buildStats(results, total)
+      yield { stats, trials: total, converged: true }
+      return
+    }
   }
 }
 
@@ -2134,64 +2213,4 @@ function buildRecordStats(
     fields[key] = buildStats(column, trialCount)
   }
   return { type: 'record', fields }
-}
-
-// ---------------------------------------------------------------------------
-// Async Monte Carlo (streaming progress)
-// ---------------------------------------------------------------------------
-
-async function* runMonteCarloAsync(
-  program: Program,
-  options?: AnalyzeAsyncOptions,
-): AsyncGenerator<AsyncProgress> {
-  const explicitTrials = options?.trials
-  const maxTrials = options?.maxTrials ?? explicitTrials ?? DEFAULT_MAX_TRIALS
-  const minTrialsRaw = options?.minTrials ?? DEFAULT_MIN_TRIALS
-  const minTrials = Math.min(minTrialsRaw, maxTrials)
-  const batchSizeRaw = options?.batchSize ?? DEFAULT_BATCH_SIZE
-  const batchSize = Math.max(1, Math.min(batchSizeRaw, maxTrials))
-  const targetRelativeError =
-    options?.targetRelativeError ?? DEFAULT_TARGET_REL_ERROR
-  const targetBinStderr = options?.targetBinStderr ?? DEFAULT_TARGET_BIN_STDERR
-  const yieldEvery = options?.yieldEvery ?? batchSize
-  const fixedTrials =
-    explicitTrials !== undefined && options?.maxTrials === undefined
-      ? explicitTrials
-      : null
-
-  const results: Value[] = []
-  let total = 0
-  let converged = false
-  const evaluator = makeEvaluator()
-  const config: ConvergenceConfig = {
-    targetRelativeError,
-    targetBinStderr,
-    minTrials,
-  }
-
-  const totalGoal = fixedTrials ?? maxTrials
-
-  while (total < totalGoal) {
-    throwIfAborted(options?.signal)
-    const target = Math.min(total + batchSize, totalGoal)
-    while (total < target) {
-      results.push(evaluator.run(program))
-      total++
-    }
-    if (
-      fixedTrials === null &&
-      total >= minTrials &&
-      hasConverged(results, config)
-    ) {
-      converged = true
-    }
-    if (total % yieldEvery === 0 || total >= totalGoal || converged) {
-      yield { stats: buildStats(results, total), trials: total, converged }
-    }
-    if (converged) break
-  }
-
-  if (!converged) {
-    yield { stats: buildStats(results, total), trials: total, converged: false }
-  }
 }

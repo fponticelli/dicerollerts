@@ -188,6 +188,10 @@ export {
   type Tier,
   type AnalysisStrategy,
   type AnalyzeResult,
+  type AnalyzeOptions,
+  type AnalyzeAsyncOptions,
+  type AsyncProgress,
+  type AnalyzeDiagnostics,
 } from './program-stats'
 export { ProgramParser, type ParseProgramResult } from './program-parser'
 export {
@@ -200,3 +204,5 @@ export {
   fieldFromRecord,
   elementFromArray,
 } from './program-stats-utils'
+
+export { Distribution } from './distribution'
