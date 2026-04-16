@@ -280,8 +280,8 @@ if (!parsed.success) {
 `ProgramStats.analyze()` picks one of three strategies:
 
 - **`constant`** - no randomness, single evaluation
-- **`exact`** - single dice expression, uses exact distribution
-- **`monte-carlo`** - adaptive batched simulation, stops when standard error converges
+- **`exact`** - covers single dice expressions, comparisons, conditionals, arithmetic on independent distributions, shared variables (via joint enumeration), boolean ops, and categorical conditionals
+- **`monte-carlo`** - adaptive batched simulation, stops when per-bin frequencies stabilize
 
 ```ts
 const result = ProgramStats.analyze(program, {
@@ -300,7 +300,22 @@ result.stats // FieldStats (per-field for records/arrays)
 const tier = ProgramStats.classify(program)
 ```
 
-`FieldStats` is a discriminated union covering numbers (mean/stddev/min/max/distribution), booleans (truePercent), strings (frequencies), arrays (per-element stats), and records (per-field stats).
+`FieldStats` is a discriminated union:
+
+- **`number`**: `mean`, `stddev`, `min`, `max`, `distribution`, `cdf`, `percentiles` (p5/p10/p25/p50/p75/p90/p95), `skewness`, `kurtosis`, optional `standardError` (Monte Carlo only)
+- **`boolean`**: `truePercent`, optional `standardError`
+- **`string`**: `frequencies`, optional per-bucket `standardErrors`
+- **`array`**: `elements: FieldStats[]`, optional `aggregate` (pooled stats when all elements are numeric)
+- **`record`**: `fields: Record<string, FieldStats>`
+
+Helpers for charting:
+
+```ts
+import { suggestBucketSize, binDistribution } from 'dicerollerts'
+
+const bucketSize = suggestBucketSize(stats.min, stats.max, 100)
+const binned = binDistribution(stats.distribution, bucketSize)
+```
 
 ## Building Expressions Programmatically
 
