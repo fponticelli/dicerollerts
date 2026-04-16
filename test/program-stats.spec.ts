@@ -1,5 +1,9 @@
 import { ProgramParser } from '../src/program-parser'
-import { ProgramStats } from '../src/program-stats'
+import {
+  ProgramStats,
+  binDistribution,
+  suggestBucketSize,
+} from '../src/program-stats'
 import type { Program } from '../src/program'
 
 function parseProgram(input: string): Program {
@@ -379,5 +383,130 @@ describe('exact - complex composition', () => {
     // on implementation. At minimum, this should not crash.
     const result = ProgramStats.analyze(prog)
     expect(result.stats.type).toBe('record')
+  })
+})
+
+describe('FieldStats - percentiles and CDF', () => {
+  test('numeric stats include percentiles', () => {
+    const prog = parseProgram('`d6`')
+    const result = ProgramStats.analyze(prog)
+    if (result.stats.type === 'number') {
+      expect(result.stats.percentiles.p50).toBeDefined()
+      expect(result.stats.percentiles.p25).toBeDefined()
+      expect(result.stats.percentiles.p75).toBeDefined()
+      // d6: p50 should be 3 or 4, p25 should be 2, p75 should be 5
+      expect(result.stats.percentiles.p50).toBeGreaterThanOrEqual(3)
+      expect(result.stats.percentiles.p50).toBeLessThanOrEqual(4)
+    }
+  })
+
+  test('numeric stats include CDF', () => {
+    const prog = parseProgram('`d6`')
+    const result = ProgramStats.analyze(prog)
+    if (result.stats.type === 'number') {
+      expect(result.stats.cdf.get(1)).toBeCloseTo(1 / 6, 5)
+      expect(result.stats.cdf.get(3)).toBeCloseTo(3 / 6, 5)
+      expect(result.stats.cdf.get(6)).toBeCloseTo(1, 5)
+    }
+  })
+
+  test('skewness and kurtosis on uniform distribution', () => {
+    const prog = parseProgram('`d6`')
+    const result = ProgramStats.analyze(prog)
+    if (result.stats.type === 'number') {
+      // d6 is uniform symmetric, skewness ~ 0
+      expect(result.stats.skewness).toBeCloseTo(0, 5)
+      // discrete uniform excess kurtosis is negative for d6
+      expect(result.stats.kurtosis).toBeLessThan(0)
+    }
+  })
+
+  test('skewness on skewed distribution', () => {
+    const prog = parseProgram('`4d6 drop 1`')
+    const result = ProgramStats.analyze(prog)
+    if (result.stats.type === 'number') {
+      // 4d6 drop lowest is left-skewed (negative skew)
+      expect(result.stats.skewness).toBeLessThan(0)
+    }
+  })
+})
+
+describe('FieldStats - standard error', () => {
+  test('exact stats have no standardError', () => {
+    const prog = parseProgram('`d6`')
+    const result = ProgramStats.analyze(prog)
+    if (result.stats.type === 'number') {
+      expect(result.stats.standardError).toBeUndefined()
+    }
+  })
+
+  test('MC boolean has standardError', () => {
+    // d6 explode on 6 with always blocks exact analysis -> MC.
+    const prog = parseProgram('`d6 explode on 6` >= 10')
+    const result = ProgramStats.analyze(prog)
+    if (
+      result.strategy.tier === 'monte-carlo' &&
+      result.stats.type === 'boolean'
+    ) {
+      expect(result.stats.standardError).toBeDefined()
+      expect(result.stats.standardError!).toBeGreaterThan(0)
+    }
+  })
+})
+
+describe('FieldStats - array aggregate', () => {
+  test('repeat with numeric body has aggregate', () => {
+    const prog = parseProgram('repeat 6 { `d6` }')
+    const result = ProgramStats.analyze(prog)
+    if (result.stats.type === 'array' && result.stats.aggregate) {
+      expect(result.stats.aggregate.mean).toBeCloseTo(3.5, 5)
+      expect(result.stats.aggregate.count).toBe(6)
+      expect(result.stats.aggregate.percentiles.p50).toBeGreaterThanOrEqual(3)
+    }
+  })
+
+  test('non-numeric array has no aggregate', () => {
+    const prog = parseProgram('repeat 3 { "x" }')
+    const result = ProgramStats.analyze(prog)
+    if (result.stats.type === 'array') {
+      expect(result.stats.aggregate).toBeUndefined()
+    }
+  })
+})
+
+describe('histogram utilities', () => {
+  test('suggestBucketSize for small range', () => {
+    expect(suggestBucketSize(1, 6)).toBe(1)
+  })
+
+  test('suggestBucketSize for large range', () => {
+    const bs = suggestBucketSize(1, 10000, 100)
+    expect(bs).toBeGreaterThan(1)
+    expect(10000 / bs).toBeLessThanOrEqual(100)
+  })
+
+  test('binDistribution preserves total probability', () => {
+    const dist = new Map([
+      [1, 0.1],
+      [2, 0.2],
+      [3, 0.3],
+      [4, 0.2],
+      [5, 0.1],
+      [6, 0.1],
+    ])
+    const binned = binDistribution(dist, 2)
+    let total = 0
+    for (const p of binned.values()) total += p
+    expect(total).toBeCloseTo(1, 10)
+  })
+
+  test('binDistribution with size 1 is identity', () => {
+    const dist = new Map([
+      [1, 0.5],
+      [2, 0.5],
+    ])
+    const binned = binDistribution(dist, 1)
+    expect(binned.get(1)).toBe(0.5)
+    expect(binned.get(2)).toBe(0.5)
   })
 })

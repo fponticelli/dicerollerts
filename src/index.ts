@@ -180,7 +180,11 @@ export {
 export { Evaluator } from './evaluator'
 export {
   ProgramStats,
+  suggestBucketSize,
+  binDistribution,
   type FieldStats,
+  type Percentiles,
+  type NumberAggregateStats,
   type Tier,
   type AnalysisStrategy,
   type AnalyzeResult,

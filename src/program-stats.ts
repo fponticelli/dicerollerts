@@ -9,6 +9,27 @@ import type {
 import { Evaluator } from './evaluator'
 import { DiceStats } from './dice-stats'
 
+export interface Percentiles {
+  p5: number
+  p10: number
+  p25: number
+  p50: number
+  p75: number
+  p90: number
+  p95: number
+}
+
+export interface NumberAggregateStats {
+  mean: number
+  stddev: number
+  min: number
+  max: number
+  distribution: Map<number, number>
+  cdf: Map<number, number>
+  percentiles: Percentiles
+  count: number
+}
+
 export type FieldStats =
   | {
       type: 'number'
@@ -17,10 +38,23 @@ export type FieldStats =
       min: number
       max: number
       distribution: Map<number, number>
+      cdf: Map<number, number>
+      percentiles: Percentiles
+      skewness: number
+      kurtosis: number
+      standardError?: number
     }
-  | { type: 'boolean'; truePercent: number }
-  | { type: 'string'; frequencies: Map<string, number> }
-  | { type: 'array'; elements: FieldStats[] }
+  | { type: 'boolean'; truePercent: number; standardError?: number }
+  | {
+      type: 'string'
+      frequencies: Map<string, number>
+      standardErrors?: Map<string, number>
+    }
+  | {
+      type: 'array'
+      elements: FieldStats[]
+      aggregate?: NumberAggregateStats
+    }
   | { type: 'record'; fields: Record<string, FieldStats> }
   | { type: 'mixed' }
 
@@ -974,6 +1008,10 @@ function analyzeExpr(expr: Expression, env: AnalysisEnv): ExprAnalysis {
             if (sub === null) return null
             elements.push(sub)
           }
+          const aggregate = computeAggregateIfNumeric(elements)
+          if (aggregate !== null) {
+            return { type: 'array', elements, aggregate }
+          }
           return { type: 'array', elements }
         }
       }
@@ -1031,6 +1069,10 @@ function analyzeExpr(expr: Expression, env: AnalysisEnv): ExprAnalysis {
           const elements: FieldStats[] = []
           for (let i = 0; i < constCount; i++) {
             elements.push(cloneFieldStats(single))
+          }
+          const aggregate = computeAggregateIfNumeric(elements)
+          if (aggregate !== null) {
+            return { type: 'array', elements, aggregate }
           }
           return { type: 'array', elements }
         }
@@ -1274,13 +1316,27 @@ function diceExpressionHasVarRef(expr: DiceExpression): boolean {
 
 function constantStats(value: Value): FieldStats {
   if (typeof value === 'number') {
+    const distribution = new Map([[value, 1]])
+    const cdf = new Map([[value, 1]])
     return {
       type: 'number',
       mean: value,
       stddev: 0,
       min: value,
       max: value,
-      distribution: new Map([[value, 1]]),
+      distribution,
+      cdf,
+      percentiles: {
+        p5: value,
+        p10: value,
+        p25: value,
+        p50: value,
+        p75: value,
+        p90: value,
+        p95: value,
+      },
+      skewness: 0,
+      kurtosis: 0,
     }
   }
   if (typeof value === 'boolean') {
@@ -1290,7 +1346,12 @@ function constantStats(value: Value): FieldStats {
     return { type: 'string', frequencies: new Map([[value, 1]]) }
   }
   if (Array.isArray(value)) {
-    return { type: 'array', elements: value.map(constantStats) }
+    const elements = value.map(constantStats)
+    const aggregate = computeAggregateIfNumeric(elements)
+    if (aggregate !== null) {
+      return { type: 'array', elements, aggregate }
+    }
+    return { type: 'array', elements }
   }
   if (value !== null && typeof value === 'object') {
     const fields: Record<string, FieldStats> = {}
@@ -1300,6 +1361,158 @@ function constantStats(value: Value): FieldStats {
     return { type: 'record', fields }
   }
   return { type: 'mixed' }
+}
+
+// ---------------------------------------------------------------------------
+// Distribution helpers (CDF, percentiles, moments, aggregate, binning)
+// ---------------------------------------------------------------------------
+
+function computeCdf(dist: Map<number, number>): Map<number, number> {
+  const sortedKeys = [...dist.keys()].sort((a, b) => a - b)
+  const cdf = new Map<number, number>()
+  let cum = 0
+  for (const k of sortedKeys) {
+    cum += dist.get(k)!
+    cdf.set(k, cum)
+  }
+  return cdf
+}
+
+function percentileFromCdf(cdf: Map<number, number>, p: number): number {
+  const sortedEntries = [...cdf.entries()].sort((a, b) => a[0] - b[0])
+  for (const [v, cum] of sortedEntries) {
+    if (cum >= p) return v
+  }
+  return sortedEntries[sortedEntries.length - 1][0]
+}
+
+function computePercentiles(cdf: Map<number, number>): Percentiles {
+  return {
+    p5: percentileFromCdf(cdf, 0.05),
+    p10: percentileFromCdf(cdf, 0.1),
+    p25: percentileFromCdf(cdf, 0.25),
+    p50: percentileFromCdf(cdf, 0.5),
+    p75: percentileFromCdf(cdf, 0.75),
+    p90: percentileFromCdf(cdf, 0.9),
+    p95: percentileFromCdf(cdf, 0.95),
+  }
+}
+
+function computeSkewness(
+  dist: Map<number, number>,
+  mean: number,
+  stddev: number,
+): number {
+  if (stddev === 0) return 0
+  let m3 = 0
+  for (const [v, p] of dist) {
+    m3 += p * Math.pow(v - mean, 3)
+  }
+  return m3 / Math.pow(stddev, 3)
+}
+
+function computeKurtosis(
+  dist: Map<number, number>,
+  mean: number,
+  stddev: number,
+): number {
+  if (stddev === 0) return 0
+  let m4 = 0
+  for (const [v, p] of dist) {
+    m4 += p * Math.pow(v - mean, 4)
+  }
+  return m4 / Math.pow(stddev, 4) - 3
+}
+
+/**
+ * Compute the aggregate stats for an array of FieldStats whose elements are
+ * all numeric. Returns null if any element is not numeric or the array is
+ * empty.
+ *
+ * The pooled distribution treats the array as a mixture: each element
+ * contributes 1/n of its probability mass to the pooled distribution. Mean
+ * and variance are computed from the pooled distribution (equivalent to:
+ * pooled_mean = avg of means, pooled_E[X^2] = avg of E[X^2_i], pooled_var =
+ * pooled_E[X^2] - pooled_mean^2).
+ */
+function computeAggregateIfNumeric(
+  elements: FieldStats[],
+): NumberAggregateStats | null {
+  if (elements.length === 0) return null
+  for (const el of elements) {
+    if (el.type !== 'number') return null
+  }
+  const numericElements = elements as Array<
+    Extract<FieldStats, { type: 'number' }>
+  >
+  const n = numericElements.length
+  const pooled = new Map<number, number>()
+  let pooledMean = 0
+  let pooledExSq = 0
+  let min = Infinity
+  let max = -Infinity
+  for (const el of numericElements) {
+    pooledMean += el.mean / n
+    pooledExSq += (el.stddev * el.stddev + el.mean * el.mean) / n
+    if (el.min < min) min = el.min
+    if (el.max > max) max = el.max
+    for (const [v, p] of el.distribution) {
+      pooled.set(v, (pooled.get(v) ?? 0) + p / n)
+    }
+  }
+  const variance = Math.max(0, pooledExSq - pooledMean * pooledMean)
+  const stddev = Math.sqrt(variance)
+  const cdf = computeCdf(pooled)
+  const percentiles = computePercentiles(cdf)
+  return {
+    mean: pooledMean,
+    stddev,
+    min,
+    max,
+    distribution: pooled,
+    cdf,
+    percentiles,
+    count: n,
+  }
+}
+
+/**
+ * Suggest a "nice" bucket size that produces at most maxBuckets buckets
+ * for a value range. Uses 1, 2, 5 multipliers of powers of 10.
+ */
+export function suggestBucketSize(
+  min: number,
+  max: number,
+  maxBuckets = 100,
+): number {
+  const range = max - min + 1
+  const multipliers = [1, 2, 5, 10, 20, 25, 50, 100]
+  let mult = 1
+  while (true) {
+    for (const m of multipliers) {
+      const bs = mult * m
+      if (range / bs <= maxBuckets) return bs
+    }
+    mult *= 100
+  }
+}
+
+/**
+ * Re-bin a distribution into buckets of the given size. Each bucket k contains
+ * the sum of probabilities of values in [(k-1)*bucketSize+1, k*bucketSize].
+ * Returns a new Map<bucketIndex, probability>. Use bucketSize=1 for no binning.
+ */
+export function binDistribution(
+  dist: Map<number, number>,
+  bucketSize: number,
+): Map<number, number> {
+  if (bucketSize === 1) return new Map(dist)
+  const result = new Map<number, number>()
+  for (const [v, p] of dist) {
+    const bucket = Math.ceil(v / bucketSize)
+    result.set(bucket, (result.get(bucket) ?? 0) + p)
+  }
+  return result
 }
 
 // ---------------------------------------------------------------------------
@@ -1321,13 +1534,22 @@ function numberStatsFromDistribution(dist: Map<number, number>): FieldStats {
   }
   const distribution = new Map<number, number>()
   for (const [k, p] of dist) distribution.set(k, p)
+  const stddev = Math.sqrt(variance)
+  const cdf = computeCdf(distribution)
+  const percentiles = computePercentiles(cdf)
+  const skewness = computeSkewness(distribution, mean, stddev)
+  const kurtosis = computeKurtosis(distribution, mean, stddev)
   return {
     type: 'number',
     mean,
-    stddev: Math.sqrt(variance),
+    stddev,
     min,
     max,
     distribution,
+    cdf,
+    percentiles,
+    skewness,
+    kurtosis,
   }
 }
 
@@ -1341,13 +1563,41 @@ function cloneFieldStats(stats: FieldStats): FieldStats {
         min: stats.min,
         max: stats.max,
         distribution: new Map(stats.distribution),
+        cdf: new Map(stats.cdf),
+        percentiles: { ...stats.percentiles },
+        skewness: stats.skewness,
+        kurtosis: stats.kurtosis,
+        ...(stats.standardError !== undefined
+          ? { standardError: stats.standardError }
+          : {}),
       }
     case 'boolean':
-      return { type: 'boolean', truePercent: stats.truePercent }
+      return {
+        type: 'boolean',
+        truePercent: stats.truePercent,
+        ...(stats.standardError !== undefined
+          ? { standardError: stats.standardError }
+          : {}),
+      }
     case 'string':
-      return { type: 'string', frequencies: new Map(stats.frequencies) }
-    case 'array':
-      return { type: 'array', elements: stats.elements.map(cloneFieldStats) }
+      return {
+        type: 'string',
+        frequencies: new Map(stats.frequencies),
+        ...(stats.standardErrors !== undefined
+          ? { standardErrors: new Map(stats.standardErrors) }
+          : {}),
+      }
+    case 'array': {
+      const elements = stats.elements.map(cloneFieldStats)
+      const aggregate = stats.aggregate
+        ? cloneAggregate(stats.aggregate)
+        : undefined
+      return {
+        type: 'array',
+        elements,
+        ...(aggregate !== undefined ? { aggregate } : {}),
+      }
+    }
     case 'record': {
       const fields: Record<string, FieldStats> = {}
       for (const [k, v] of Object.entries(stats.fields)) {
@@ -1357,6 +1607,19 @@ function cloneFieldStats(stats: FieldStats): FieldStats {
     }
     case 'mixed':
       return { type: 'mixed' }
+  }
+}
+
+function cloneAggregate(agg: NumberAggregateStats): NumberAggregateStats {
+  return {
+    mean: agg.mean,
+    stddev: agg.stddev,
+    min: agg.min,
+    max: agg.max,
+    distribution: new Map(agg.distribution),
+    cdf: new Map(agg.cdf),
+    percentiles: { ...agg.percentiles },
+    count: agg.count,
   }
 }
 
@@ -1404,7 +1667,7 @@ function runMonteCarlo(
     }
     total = fixedTrials
     return {
-      stats: buildStats(results),
+      stats: buildStats(results, total),
       strategy: { tier: 'monte-carlo', trials: total, converged: false },
     }
   }
@@ -1441,7 +1704,7 @@ function runMonteCarlo(
   }
 
   return {
-    stats: buildStats(results),
+    stats: buildStats(results, total),
     strategy: { tier: 'monte-carlo', trials: total, converged },
   }
 }
@@ -1542,7 +1805,7 @@ function stringConverged(values: string[], targetBinStderr: number): boolean {
 // Stats aggregation (Monte Carlo result -> FieldStats)
 // ---------------------------------------------------------------------------
 
-function buildStats(values: Value[]): FieldStats {
+function buildStats(values: Value[], trialCount?: number): FieldStats {
   if (values.length === 0) return { type: 'mixed' }
 
   const first = values[0]
@@ -1552,24 +1815,29 @@ function buildStats(values: Value[]): FieldStats {
     if (typeOf(v) !== firstType) return { type: 'mixed' }
   }
 
+  // When trialCount is provided (top-level MC call) we use it for stderr;
+  // otherwise (recursive calls into columns of arrays/records) we treat the
+  // column length as the trial count.
+  const n = trialCount ?? values.length
+
   if (firstType === 'number') {
-    return buildNumberStats(values as number[])
+    return buildNumberStats(values as number[], n)
   }
 
   if (firstType === 'boolean') {
-    return buildBooleanStats(values as boolean[])
+    return buildBooleanStats(values as boolean[], n)
   }
 
   if (firstType === 'string') {
-    return buildStringStats(values as string[])
+    return buildStringStats(values as string[], n)
   }
 
   if (firstType === 'array') {
-    return buildArrayStats(values as Value[][])
+    return buildArrayStats(values as Value[][], n)
   }
 
   if (firstType === 'record') {
-    return buildRecordStats(values as Record<string, Value>[])
+    return buildRecordStats(values as Record<string, Value>[], n)
   }
 
   return { type: 'mixed' }
@@ -1583,7 +1851,7 @@ function typeOf(value: Value): string {
   return 'record'
 }
 
-function buildNumberStats(values: number[]): FieldStats {
+function buildNumberStats(values: number[], trialCount: number): FieldStats {
   const n = values.length
   let sum = 0
   let min = values[0]
@@ -1610,15 +1878,38 @@ function buildNumberStats(values: number[]): FieldStats {
     distribution.set(k, count / n)
   }
 
-  return { type: 'number', mean, stddev, min, max, distribution }
+  const cdf = computeCdf(distribution)
+  const percentiles = computePercentiles(cdf)
+  const skewness = computeSkewness(distribution, mean, stddev)
+  const kurtosis = computeKurtosis(distribution, mean, stddev)
+  const standardError = trialCount > 0 ? stddev / Math.sqrt(trialCount) : 0
+
+  return {
+    type: 'number',
+    mean,
+    stddev,
+    min,
+    max,
+    distribution,
+    cdf,
+    percentiles,
+    skewness,
+    kurtosis,
+    standardError,
+  }
 }
 
-function buildBooleanStats(values: boolean[]): FieldStats {
+function buildBooleanStats(values: boolean[], trialCount: number): FieldStats {
   const trueCount = values.filter((v) => v).length
-  return { type: 'boolean', truePercent: trueCount / values.length }
+  const truePercent = trueCount / values.length
+  const standardError =
+    trialCount > 0
+      ? Math.sqrt((truePercent * (1 - truePercent)) / trialCount)
+      : 0
+  return { type: 'boolean', truePercent, standardError }
 }
 
-function buildStringStats(values: string[]): FieldStats {
+function buildStringStats(values: string[], trialCount: number): FieldStats {
   const counts = new Map<string, number>()
   for (const v of values) {
     counts.set(v, (counts.get(v) ?? 0) + 1)
@@ -1627,27 +1918,41 @@ function buildStringStats(values: string[]): FieldStats {
   for (const [k, count] of counts) {
     frequencies.set(k, count / values.length)
   }
-  return { type: 'string', frequencies }
+  const standardErrors = new Map<string, number>()
+  for (const [k, f] of frequencies) {
+    standardErrors.set(
+      k,
+      trialCount > 0 ? Math.sqrt((f * (1 - f)) / trialCount) : 0,
+    )
+  }
+  return { type: 'string', frequencies, standardErrors }
 }
 
-function buildArrayStats(values: Value[][]): FieldStats {
+function buildArrayStats(values: Value[][], trialCount: number): FieldStats {
   if (values.length === 0) return { type: 'array', elements: [] }
   const length = values[0].length
   const elements: FieldStats[] = []
   for (let i = 0; i < length; i++) {
     const column = values.map((arr) => arr[i])
-    elements.push(buildStats(column))
+    elements.push(buildStats(column, trialCount))
+  }
+  const aggregate = computeAggregateIfNumeric(elements)
+  if (aggregate !== null) {
+    return { type: 'array', elements, aggregate }
   }
   return { type: 'array', elements }
 }
 
-function buildRecordStats(values: Record<string, Value>[]): FieldStats {
+function buildRecordStats(
+  values: Record<string, Value>[],
+  trialCount: number,
+): FieldStats {
   if (values.length === 0) return { type: 'record', fields: {} }
   const keys = Object.keys(values[0])
   const fields: Record<string, FieldStats> = {}
   for (const key of keys) {
     const column = values.map((rec) => rec[key])
-    fields[key] = buildStats(column)
+    fields[key] = buildStats(column, trialCount)
   }
   return { type: 'record', fields }
 }
