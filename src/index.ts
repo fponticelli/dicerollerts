@@ -178,5 +178,11 @@ export {
 } from './program'
 
 export { Evaluator } from './evaluator'
-export { ProgramStats, type FieldStats } from './program-stats'
+export {
+  ProgramStats,
+  type FieldStats,
+  type Tier,
+  type AnalysisStrategy,
+  type AnalyzeResult,
+} from './program-stats'
 export { ProgramParser, type ParseProgramResult } from './program-parser'
