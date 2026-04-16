@@ -224,6 +224,84 @@ s.distribution
 s.percentiles // { 25, 50, 75 }
 ```
 
+## Dice Language
+
+A scripting language for tabletop RPG automation, with variables, conditionals, records, arrays, and loops. Dice expressions live in backticks.
+
+```ts
+import { DiceParser, Evaluator, ProgramStats } from 'dicerollerts'
+
+const source = `
+$str_mod = 5
+$ac = 15
+$attack = \`d20 + $str_mod\`
+$hit = $attack >= $ac
+$damage = if $hit then \`2d6 + $str_mod\` else 0
+{ attack: $attack, hit: $hit, damage: $damage }
+`
+
+// Parse
+const parsed = DiceParser.parseProgram(source)
+if (!parsed.success) {
+  console.error(parsed.errors)
+} else {
+  // Roll once
+  const evaluator = new Evaluator(
+    (sides) => Math.floor(Math.random() * sides) + 1,
+  )
+  const result = evaluator.run(parsed.program)
+  // result is e.g. { attack: 18, hit: true, damage: 14 }
+
+  // Probability analysis (auto-detects best strategy)
+  const analysis = ProgramStats.analyze(parsed.program)
+  // analysis.strategy.tier: 'constant' | 'exact' | 'monte-carlo'
+  // analysis.stats: per-field distributions
+}
+```
+
+### Language features
+
+- Variables: `$name = expr` (immutable, `$[a-z_][a-z0-9_]*`)
+- Dice in backticks: `` `d20 + $mod` ``, `` `4d6 drop 1` ``, `` `8d10 count >= 6` ``
+- Parametric dice with uppercase `D`: `` `$numD$sides` ``
+- Arithmetic: `+`, `-`, `*`, `/` (integer division)
+- Comparison: `==`, `!=`, `>`, `<`, `>=`, `<=`
+- Boolean: `and`, `or`, `not`
+- `if cond then a else b` (else required)
+- Records: `{ key: value, ... }`, shorthand `{ $var }`
+- Field access: `$rec.field`
+- Arrays: `[1, 2, 3]`, indexing: `$arr[0]`
+- `repeat N { body }` (returns array)
+- Comments: `# line comment`
+- Statements separated by newlines
+
+### Probability analysis
+
+`ProgramStats.analyze()` picks one of three strategies:
+
+- **`constant`** - no randomness, single evaluation
+- **`exact`** - single dice expression, uses exact distribution
+- **`monte-carlo`** - adaptive batched simulation, stops when standard error converges
+
+```ts
+const result = ProgramStats.analyze(program, {
+  minTrials: 1000, // initial batch
+  maxTrials: 100000, // cap
+  batchSize: 1000, // batch increment
+  targetRelativeError: 0.01, // 1% convergence target
+})
+
+result.strategy.tier // 'constant' | 'exact' | 'monte-carlo'
+result.strategy.trials // actual trials run (monte-carlo)
+result.strategy.converged // hit target before maxTrials
+result.stats // FieldStats (per-field for records/arrays)
+
+// Manual classification
+const tier = ProgramStats.classify(program)
+```
+
+`FieldStats` is a discriminated union covering numbers (mean/stddev/min/max/distribution), booleans (truePercent), strings (frequencies), arrays (per-element stats), and records (per-field stats).
+
 ## Building Expressions Programmatically
 
 ```ts
