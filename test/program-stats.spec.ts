@@ -172,3 +172,58 @@ describe('analysis tiers', () => {
     expect(result.strategy.trials).toBeLessThanOrEqual(50000)
   })
 })
+
+describe('per-bin convergence', () => {
+  test('4d6 drop 1 monte carlo runs more trials for smooth distribution', () => {
+    // 4d6 drop 1 itself is now exact-analyzable as a single dice expr
+    // but if we had something MC-only with similar shape, it should run > 1000 trials
+    const prog = parseProgram('if `d6` >= 1 then `4d6 drop 1` else 0')
+    const result = ProgramStats.analyze(prog)
+    expect(result.strategy.tier).toBe('monte-carlo')
+    // With per-bin convergence, should run more than the minTrials floor
+    expect(result.strategy.trials).toBeGreaterThan(1000)
+  })
+})
+
+describe('exact tier extensions', () => {
+  test('repeat with constant body is exact', () => {
+    const prog = parseProgram('repeat 6 { `4d6 drop 1` }')
+    expect(ProgramStats.classify(prog)).toBe('exact')
+    const result = ProgramStats.analyze(prog)
+    expect(result.strategy.tier).toBe('exact')
+    if (result.stats.type === 'array') {
+      expect(result.stats.elements).toHaveLength(6)
+      // each element should be the same exact distribution
+      if (result.stats.elements[0].type === 'number') {
+        expect(result.stats.elements[0].mean).toBeCloseTo(12.24, 1)
+      }
+    }
+  })
+
+  test('array literal of independent dice is exact', () => {
+    const prog = parseProgram('[`d6`, `d8`, `d10`]')
+    expect(ProgramStats.classify(prog)).toBe('exact')
+  })
+
+  test('record of independent dice is exact', () => {
+    const prog = parseProgram('{ atk: `d20`, dmg: `2d6` }')
+    expect(ProgramStats.classify(prog)).toBe('exact')
+  })
+
+  test('record sharing variable is monte-carlo', () => {
+    const prog = parseProgram('$x = `d6`\n{ a: $x, b: $x }')
+    expect(ProgramStats.classify(prog)).toBe('monte-carlo')
+  })
+
+  test('repeat with non-constant count is monte-carlo', () => {
+    const prog = parseProgram('$n = `d6`\nrepeat $n { `d4` }')
+    expect(ProgramStats.classify(prog)).toBe('monte-carlo')
+  })
+
+  test('dice expression with variable substitution is monte-carlo', () => {
+    // dice-variable-ref inside backticks blocks exact analysis (option a)
+    const prog = parseProgram('$mod = 5\n`d20 + $mod`')
+    // even though everything is constant + dice, we conservatively use MC
+    expect(ProgramStats.classify(prog)).toBe('monte-carlo')
+  })
+})

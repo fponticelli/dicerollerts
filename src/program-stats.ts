@@ -1,5 +1,5 @@
 import type { DiceExpression } from './dice-expression'
-import type { Program, Statement, Expression, Value } from './program'
+import type { Program, Expression, Value } from './program'
 import { Evaluator } from './evaluator'
 import { DiceStats } from './dice-stats'
 
@@ -38,12 +38,14 @@ interface AnalyzeOptions {
   minTrials?: number
   batchSize?: number
   targetRelativeError?: number
+  targetBinStderr?: number
 }
 
 const DEFAULT_MAX_TRIALS = 100000
 const DEFAULT_MIN_TRIALS = 1000
 const DEFAULT_BATCH_SIZE = 1000
 const DEFAULT_TARGET_REL_ERROR = 0.01
+const DEFAULT_TARGET_BIN_STDERR = 0.005
 
 export const ProgramStats = {
   classify(program: Program): Tier {
@@ -51,9 +53,9 @@ export const ProgramStats = {
   },
 
   analyze(program: Program, options?: AnalyzeOptions): AnalyzeResult {
-    const tier = classifyProgram(program)
+    const analysis = analyzeProgram(program)
 
-    if (tier === 'constant') {
+    if (!analysis.random) {
       const evaluator = makeEvaluator()
       const value = evaluator.run(program)
       return {
@@ -62,17 +64,12 @@ export const ProgramStats = {
       }
     }
 
-    if (tier === 'exact') {
-      const diceExpr = extractSingleDiceExpression(program)
-      if (diceExpr !== null) {
-        try {
-          const dist = DiceStats.distribution(diceExpr)
-          return {
-            stats: numberStatsFromDistribution(dist),
-            strategy: { tier: 'exact' },
-          }
-        } catch {
-          // Fall through to Monte Carlo if exact analysis is unsupported
+    if (analysis.exactDist !== null) {
+      const stats = analysis.exactDist()
+      if (stats !== null) {
+        return {
+          stats,
+          strategy: { tier: 'exact' },
         }
       }
     }
@@ -82,135 +79,356 @@ export const ProgramStats = {
 }
 
 // ---------------------------------------------------------------------------
-// Classification
+// Per-expression analysis
 // ---------------------------------------------------------------------------
 
-interface ClassifyContext {
-  randomVars: Set<string>
-  varUseCount: Map<string, number>
-}
-
-function makeContext(): ClassifyContext {
-  return { randomVars: new Set(), varUseCount: new Map() }
-}
-
-interface ExprClassification {
+interface ExprAnalysis {
   random: boolean
+  randomVarsUsed: Set<string>
+  // A thunk producing the exact FieldStats for the expression, or null if
+  // the expression cannot be analyzed exactly.
+  exactDist: (() => FieldStats | null) | null
+}
+
+interface AnalysisEnv {
+  // Map of variable name -> analysis of its bound expression. Used to look up
+  // randomVarsUsed transitively and to detect aliases of exact compositions.
+  bindings: Map<string, ExprAnalysis>
+}
+
+function makeAnalysisEnv(): AnalysisEnv {
+  return { bindings: new Map() }
 }
 
 function classifyProgram(program: Program): Tier {
-  const ctx = makeContext()
-  let lastExprClass: ExprClassification = { random: false }
-  let lastStmt: Statement | null = null
-
-  for (const stmt of program.statements) {
-    lastStmt = stmt
-    if (stmt.type === 'assignment') {
-      const c = classifyExpr(stmt.value, ctx)
-      if (c.random) ctx.randomVars.add(stmt.name)
-      lastExprClass = c
-    } else {
-      lastExprClass = classifyExpr(stmt.expr, ctx)
-    }
-  }
-
-  if (!lastExprClass.random) return 'constant'
-
-  // Tier 2 (exact) only for the simplest case: a single expression-statement
-  // whose expression is a `DiceExpr` with no variable references inside.
-  if (
-    lastStmt &&
-    lastStmt.type === 'expression-statement' &&
-    lastStmt.expr.type === 'dice-expr' &&
-    !diceExpressionHasVarRef(lastStmt.expr.expr) &&
-    program.statements.length === 1
-  ) {
+  const analysis = analyzeProgram(program)
+  if (!analysis.random) return 'constant'
+  if (analysis.exactDist !== null) {
+    // Test the thunk - if it returns null we cannot actually compute exact stats.
+    // However, classify() should not actually compute the (possibly expensive)
+    // distribution. We trust the structural analysis: thunks are non-null only
+    // when sub-pieces also report exactDist; the only failure mode is
+    // DiceStats.distribution() throwing for an unsupported dice expression.
+    // To avoid running heavy computation here, we still mark as exact when the
+    // structural analysis says so. The analyze() entry point will fall back to
+    // monte-carlo if the thunk later returns null.
     return 'exact'
   }
-
   return 'monte-carlo'
 }
 
-function classifyExpr(
-  expr: Expression,
-  ctx: ClassifyContext,
-): ExprClassification {
+function analyzeProgram(program: Program): ExprAnalysis {
+  const env = makeAnalysisEnv()
+  let last: ExprAnalysis = nonRandomAnalysis()
+
+  for (const stmt of program.statements) {
+    if (stmt.type === 'assignment') {
+      const a = analyzeExpr(stmt.value, env)
+      env.bindings.set(stmt.name, a)
+      last = a
+    } else {
+      last = analyzeExpr(stmt.expr, env)
+    }
+  }
+
+  return last
+}
+
+function nonRandomAnalysis(): ExprAnalysis {
+  return { random: false, randomVarsUsed: new Set(), exactDist: null }
+}
+
+function analyzeExpr(expr: Expression, env: AnalysisEnv): ExprAnalysis {
   switch (expr.type) {
     case 'number-literal':
     case 'boolean-literal':
     case 'string-literal':
-      return { random: false }
+      return nonRandomAnalysis()
 
     case 'variable-ref': {
-      ctx.varUseCount.set(expr.name, (ctx.varUseCount.get(expr.name) ?? 0) + 1)
-      return { random: ctx.randomVars.has(expr.name) }
+      const bound = env.bindings.get(expr.name)
+      if (!bound) {
+        // Unbound (shouldn't happen in valid programs); treat as non-random.
+        return nonRandomAnalysis()
+      }
+      // Referencing a random variable means this expression depends on that
+      // variable's randomness. Track the variable name itself as a "random
+      // variable used" so siblings sharing the same variable can be detected
+      // as correlated.
+      const randomVarsUsed = new Set<string>()
+      if (bound.random) randomVarsUsed.add(expr.name)
+      // Variable references are exact only when the bound value is non-random
+      // (a deterministic alias). For random variables, we cannot recompute the
+      // distribution from a reference alone (would create correlations).
+      // However an exact-dist binding may still be inlined when used as the
+      // sole reference inside a record/array field; conservatively we treat
+      // bare variable refs as non-exact for arbitrary use sites.
+      return {
+        random: bound.random,
+        randomVarsUsed,
+        exactDist: null,
+      }
     }
 
-    case 'dice-expr':
-      return { random: true }
+    case 'dice-expr': {
+      const hasVarRef = diceExpressionHasVarRef(expr.expr)
+      const exprCopy = expr.expr
+      const exactDist: (() => FieldStats | null) | null = hasVarRef
+        ? null
+        : () => {
+            try {
+              const dist = DiceStats.distribution(exprCopy)
+              return numberStatsFromDistribution(dist)
+            } catch {
+              return null
+            }
+          }
+      return {
+        random: true,
+        randomVarsUsed: new Set(),
+        exactDist,
+      }
+    }
 
-    case 'unary-expr':
-      return classifyExpr(expr.expr, ctx)
+    case 'unary-expr': {
+      const inner = analyzeExpr(expr.expr, env)
+      return {
+        random: inner.random,
+        randomVarsUsed: new Set(inner.randomVarsUsed),
+        exactDist: null,
+      }
+    }
 
     case 'binary-expr': {
-      const left = classifyExpr(expr.left, ctx)
-      const right = classifyExpr(expr.right, ctx)
-      return { random: left.random || right.random }
+      const left = analyzeExpr(expr.left, env)
+      const right = analyzeExpr(expr.right, env)
+      return {
+        random: left.random || right.random,
+        randomVarsUsed: unionSets(left.randomVarsUsed, right.randomVarsUsed),
+        exactDist: null,
+      }
     }
 
     case 'if-expr': {
-      const cond = classifyExpr(expr.condition, ctx)
-      const thenC = classifyExpr(expr.then, ctx)
-      const elseC = classifyExpr(expr.else, ctx)
-      return { random: cond.random || thenC.random || elseC.random }
+      const cond = analyzeExpr(expr.condition, env)
+      const thenA = analyzeExpr(expr.then, env)
+      const elseA = analyzeExpr(expr.else, env)
+      return {
+        random: cond.random || thenA.random || elseA.random,
+        randomVarsUsed: unionSets(
+          cond.randomVarsUsed,
+          unionSets(thenA.randomVarsUsed, elseA.randomVarsUsed),
+        ),
+        exactDist: null,
+      }
     }
 
     case 'record-expr': {
-      let random = false
-      for (const f of expr.fields) {
-        const c = classifyExpr(f.value, ctx)
-        if (c.random) random = true
+      const fieldAnalyses: { key: string; analysis: ExprAnalysis }[] =
+        expr.fields.map((f) => ({
+          key: f.key,
+          analysis: analyzeExpr(f.value, env),
+        }))
+      const random = fieldAnalyses.some((f) => f.analysis.random)
+      const randomVarsUsed = fieldAnalyses.reduce(
+        (acc, f) => unionSets(acc, f.analysis.randomVarsUsed),
+        new Set<string>(),
+      )
+
+      let exactDist: (() => FieldStats | null) | null = null
+      if (
+        random &&
+        fieldAnalyses.every((f) => f.analysis.exactDist !== null) &&
+        disjointRandomVars(fieldAnalyses.map((f) => f.analysis))
+      ) {
+        exactDist = () => {
+          const fields: Record<string, FieldStats> = {}
+          for (const f of fieldAnalyses) {
+            const sub = f.analysis.exactDist!()
+            if (sub === null) return null
+            fields[f.key] = sub
+          }
+          return { type: 'record', fields }
+        }
       }
-      return { random }
+
+      return { random, randomVarsUsed, exactDist }
     }
 
     case 'array-expr': {
-      let random = false
-      for (const el of expr.elements) {
-        const c = classifyExpr(el, ctx)
-        if (c.random) random = true
+      const elementAnalyses = expr.elements.map((el) => analyzeExpr(el, env))
+      const random = elementAnalyses.some((a) => a.random)
+      const randomVarsUsed = elementAnalyses.reduce(
+        (acc, a) => unionSets(acc, a.randomVarsUsed),
+        new Set<string>(),
+      )
+
+      let exactDist: (() => FieldStats | null) | null = null
+      if (
+        random &&
+        elementAnalyses.every((a) => a.exactDist !== null) &&
+        disjointRandomVars(elementAnalyses)
+      ) {
+        exactDist = () => {
+          const elements: FieldStats[] = []
+          for (const a of elementAnalyses) {
+            const sub = a.exactDist!()
+            if (sub === null) return null
+            elements.push(sub)
+          }
+          return { type: 'array', elements }
+        }
       }
-      return { random }
+
+      return { random, randomVarsUsed, exactDist }
     }
 
     case 'repeat-expr': {
-      // Even if body is non-random, the count or body randomness propagates.
-      const countC = classifyExpr(expr.count, ctx)
-      let bodyRandom = false
+      const countA = analyzeExpr(expr.count, env)
+      // Variables defined outside the repeat body: snapshot now so we can
+      // detect references to them from within the body.
+      const outerVars = new Set(env.bindings.keys())
+
+      // Repeat body runs in a fresh scope each iteration. Analyze the body's
+      // statements with a child environment that inherits outer bindings (for
+      // randomVar tracking) but isolates new ones.
+      const childEnv: AnalysisEnv = {
+        bindings: new Map(env.bindings),
+      }
+      let bodyLast: ExprAnalysis = nonRandomAnalysis()
       for (const stmt of expr.body) {
         if (stmt.type === 'assignment') {
-          const c = classifyExpr(stmt.value, ctx)
-          if (c.random) {
-            ctx.randomVars.add(stmt.name)
-            bodyRandom = true
-          }
+          const a = analyzeExpr(stmt.value, childEnv)
+          childEnv.bindings.set(stmt.name, a)
+          bodyLast = a
         } else {
-          const c = classifyExpr(stmt.expr, ctx)
-          if (c.random) bodyRandom = true
+          bodyLast = analyzeExpr(stmt.expr, childEnv)
         }
       }
-      return { random: countC.random || bodyRandom }
+
+      const random = countA.random || bodyLast.random
+      const randomVarsUsed = unionSets(
+        countA.randomVarsUsed,
+        bodyLast.randomVarsUsed,
+      )
+
+      let exactDist: (() => FieldStats | null) | null = null
+      const constCount = constantIntegerValue(expr.count)
+      // Body uses no random variables from the outer scope.
+      const bodyUsesOuterRandomVars = setsIntersect(
+        bodyLast.randomVarsUsed,
+        outerVars,
+      )
+      if (
+        constCount !== null &&
+        constCount >= 0 &&
+        bodyLast.exactDist !== null &&
+        bodyLast.random &&
+        !bodyUsesOuterRandomVars
+      ) {
+        exactDist = () => {
+          // Compute the body's exact stats once, then clone for each iteration.
+          const single = bodyLast.exactDist!()
+          if (single === null) return null
+          const elements: FieldStats[] = []
+          for (let i = 0; i < constCount; i++) {
+            elements.push(cloneFieldStats(single))
+          }
+          return { type: 'array', elements }
+        }
+      }
+
+      return { random, randomVarsUsed, exactDist }
     }
 
-    case 'field-access':
-      return classifyExpr(expr.object, ctx)
+    case 'field-access': {
+      const obj = analyzeExpr(expr.object, env)
+      // Special case: $rec.field where $rec is a variable bound directly to a
+      // record literal whose field is exact.
+      if (expr.object.type === 'variable-ref') {
+        const bound = env.bindings.get(expr.object.name)
+        if (bound && bound.exactDist !== null) {
+          const field = expr.field
+          const exactDist: () => FieldStats | null = () => {
+            const stats = bound.exactDist!()
+            if (stats === null || stats.type !== 'record') return null
+            return stats.fields[field] ?? null
+          }
+          return {
+            random: obj.random,
+            randomVarsUsed: new Set(obj.randomVarsUsed),
+            exactDist,
+          }
+        }
+      }
+      return {
+        random: obj.random,
+        randomVarsUsed: new Set(obj.randomVarsUsed),
+        exactDist: null,
+      }
+    }
 
     case 'index-access': {
-      const obj = classifyExpr(expr.object, ctx)
-      const idx = classifyExpr(expr.index, ctx)
-      return { random: obj.random || idx.random }
+      const obj = analyzeExpr(expr.object, env)
+      const idx = analyzeExpr(expr.index, env)
+      const constIdx = constantIntegerValue(expr.index)
+      if (
+        expr.object.type === 'variable-ref' &&
+        constIdx !== null &&
+        !idx.random
+      ) {
+        const bound = env.bindings.get(expr.object.name)
+        if (bound && bound.exactDist !== null) {
+          const exactDist: () => FieldStats | null = () => {
+            const stats = bound.exactDist!()
+            if (stats === null || stats.type !== 'array') return null
+            return stats.elements[constIdx] ?? null
+          }
+          return {
+            random: obj.random || idx.random,
+            randomVarsUsed: unionSets(obj.randomVarsUsed, idx.randomVarsUsed),
+            exactDist,
+          }
+        }
+      }
+      return {
+        random: obj.random || idx.random,
+        randomVarsUsed: unionSets(obj.randomVarsUsed, idx.randomVarsUsed),
+        exactDist: null,
+      }
     }
   }
+}
+
+// Returns the constant integer value of an expression, or null if the
+// expression is not a constant integer literal.
+function constantIntegerValue(expr: Expression): number | null {
+  if (expr.type === 'number-literal' && Number.isInteger(expr.value)) {
+    return expr.value
+  }
+  return null
+}
+
+function disjointRandomVars(analyses: ExprAnalysis[]): boolean {
+  const seen = new Set<string>()
+  for (const a of analyses) {
+    for (const name of a.randomVarsUsed) {
+      if (seen.has(name)) return false
+      seen.add(name)
+    }
+  }
+  return true
+}
+
+function unionSets<T>(a: Set<T>, b: Set<T>): Set<T> {
+  const out = new Set<T>(a)
+  for (const v of b) out.add(v)
+  return out
+}
+
+function setsIntersect<T>(a: Set<T>, b: Set<T>): boolean {
+  for (const v of a) if (b.has(v)) return true
+  return false
 }
 
 function diceExpressionHasVarRef(expr: DiceExpression): boolean {
@@ -241,14 +459,6 @@ function diceExpressionHasVarRef(expr: DiceExpression): boolean {
       }
     }
   }
-}
-
-function extractSingleDiceExpression(program: Program): DiceExpression | null {
-  if (program.statements.length !== 1) return null
-  const stmt = program.statements[0]
-  if (stmt.type !== 'expression-statement') return null
-  if (stmt.expr.type !== 'dice-expr') return null
-  return stmt.expr.expr
 }
 
 // ---------------------------------------------------------------------------
@@ -315,6 +525,35 @@ function numberStatsFromDistribution(dist: Map<number, number>): FieldStats {
   }
 }
 
+function cloneFieldStats(stats: FieldStats): FieldStats {
+  switch (stats.type) {
+    case 'number':
+      return {
+        type: 'number',
+        mean: stats.mean,
+        stddev: stats.stddev,
+        min: stats.min,
+        max: stats.max,
+        distribution: new Map(stats.distribution),
+      }
+    case 'boolean':
+      return { type: 'boolean', truePercent: stats.truePercent }
+    case 'string':
+      return { type: 'string', frequencies: new Map(stats.frequencies) }
+    case 'array':
+      return { type: 'array', elements: stats.elements.map(cloneFieldStats) }
+    case 'record': {
+      const fields: Record<string, FieldStats> = {}
+      for (const [k, v] of Object.entries(stats.fields)) {
+        fields[k] = cloneFieldStats(v)
+      }
+      return { type: 'record', fields }
+    }
+    case 'mixed':
+      return { type: 'mixed' }
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Adaptive Monte Carlo tier
 // ---------------------------------------------------------------------------
@@ -322,6 +561,12 @@ function numberStatsFromDistribution(dist: Map<number, number>): FieldStats {
 function makeEvaluator(): Evaluator {
   const rollFn = (max: number) => Math.floor(Math.random() * max) + 1
   return new Evaluator(rollFn)
+}
+
+interface ConvergenceConfig {
+  targetRelativeError: number
+  targetBinStderr: number
+  minTrials: number
 }
 
 function runMonteCarlo(
@@ -336,6 +581,7 @@ function runMonteCarlo(
   const batchSize = Math.max(1, Math.min(batchSizeRaw, maxTrials))
   const targetRelativeError =
     options?.targetRelativeError ?? DEFAULT_TARGET_REL_ERROR
+  const targetBinStderr = options?.targetBinStderr ?? DEFAULT_TARGET_BIN_STDERR
   // If user passed legacy `trials` (without maxTrials), honor it as a fixed run.
   const fixedTrials =
     explicitTrials !== undefined && options?.maxTrials === undefined
@@ -359,6 +605,11 @@ function runMonteCarlo(
   }
 
   const evaluator = makeEvaluator()
+  const config: ConvergenceConfig = {
+    targetRelativeError,
+    targetBinStderr,
+    minTrials,
+  }
 
   // Phase 1: minTrials
   while (total < minTrials) {
@@ -371,7 +622,7 @@ function runMonteCarlo(
 
   // Phase 2: keep running batches until convergence or maxTrials
   while (total < maxTrials) {
-    if (hasConverged(results, targetRelativeError)) {
+    if (hasConverged(results, config)) {
       converged = true
       break
     }
@@ -382,7 +633,7 @@ function runMonteCarlo(
     }
   }
 
-  if (!converged && hasConverged(results, targetRelativeError)) {
+  if (!converged && hasConverged(results, config)) {
     converged = true
   }
 
@@ -396,12 +647,12 @@ function runMonteCarlo(
 // Convergence checks
 // ---------------------------------------------------------------------------
 
-function hasConverged(values: Value[], target: number): boolean {
+function hasConverged(values: Value[], config: ConvergenceConfig): boolean {
   if (values.length === 0) return false
-  return checkConvergence(values, target)
+  return checkConvergence(values, config)
 }
 
-function checkConvergence(values: Value[], target: number): boolean {
+function checkConvergence(values: Value[], config: ConvergenceConfig): boolean {
   const first = values[0]
   const t = typeOf(first)
   for (const v of values) {
@@ -409,18 +660,18 @@ function checkConvergence(values: Value[], target: number): boolean {
   }
   switch (t) {
     case 'number':
-      return numberConverged(values as number[], target)
+      return numberConverged(values as number[], config)
     case 'boolean':
-      return booleanConverged(values as boolean[], target)
+      return booleanConverged(values as boolean[], config.targetBinStderr)
     case 'string':
-      return stringConverged(values as string[], target)
+      return stringConverged(values as string[], config.targetBinStderr)
     case 'array': {
       const arrs = values as Value[][]
       if (arrs.length === 0) return true
       const len = arrs[0].length
       for (let i = 0; i < len; i++) {
         const column = arrs.map((a) => a[i])
-        if (!checkConvergence(column, target)) return false
+        if (!checkConvergence(column, config)) return false
       }
       return true
     }
@@ -430,7 +681,7 @@ function checkConvergence(values: Value[], target: number): boolean {
       const keys = Object.keys(recs[0])
       for (const k of keys) {
         const column = recs.map((r) => r[k])
-        if (!checkConvergence(column, target)) return false
+        if (!checkConvergence(column, config)) return false
       }
       return true
     }
@@ -439,31 +690,32 @@ function checkConvergence(values: Value[], target: number): boolean {
   }
 }
 
-function numberConverged(values: number[], target: number): boolean {
+function numberConverged(values: number[], config: ConvergenceConfig): boolean {
   const n = values.length
   if (n < 2) return false
-  let sum = 0
-  let min = values[0]
-  let max = values[0]
-  for (const v of values) {
-    sum += v
-    if (v < min) min = v
-    if (v > max) max = v
+
+  // Count unique values to handle the degenerate case of very few bins.
+  const counts = new Map<number, number>()
+  for (const v of values) counts.set(v, (counts.get(v) ?? 0) + 1)
+
+  // For very few unique values the per-bin check converges almost instantly,
+  // so require at least minTrials samples before declaring convergence.
+  if (counts.size <= 2 && n < config.minTrials) return false
+
+  // Per-bin convergence: each bin's frequency standard error must be below
+  // the target. Ignore "noise" bins where p < 1/n (essentially singletons
+  // from rare values).
+  const threshold = 1 / n
+  for (const c of counts.values()) {
+    const p = c / n
+    if (p < threshold) continue
+    const stderrP = Math.sqrt((p * (1 - p)) / n)
+    if (stderrP > config.targetBinStderr) return false
   }
-  const mean = sum / n
-  let variance = 0
-  for (const v of values) variance += (v - mean) ** 2
-  variance /= n
-  const stddev = Math.sqrt(variance)
-  const stderr = stddev / Math.sqrt(n)
-  if (stddev === 0) return true
-  const range = max - min
-  // Use range when meaningful, otherwise fall back to |mean|, then to stddev.
-  const denom = range > 0 ? range : Math.abs(mean) > 0 ? Math.abs(mean) : stddev
-  return stderr / denom <= target
+  return true
 }
 
-function booleanConverged(values: boolean[], target: number): boolean {
+function booleanConverged(values: boolean[], targetBinStderr: number): boolean {
   const n = values.length
   if (n < 2) return false
   let trueCount = 0
@@ -473,19 +725,20 @@ function booleanConverged(values: boolean[], target: number): boolean {
   // when p is at an extreme to avoid early convergence on tiny samples.
   const variance = Math.max(p * (1 - p), 0)
   const stderr = Math.sqrt(variance / n)
-  // Compare stderr against the target; range for booleans is 1.
-  return stderr <= target
+  return stderr <= targetBinStderr
 }
 
-function stringConverged(values: string[], target: number): boolean {
+function stringConverged(values: string[], targetBinStderr: number): boolean {
   const n = values.length
   if (n < 2) return false
   const counts = new Map<string, number>()
   for (const v of values) counts.set(v, (counts.get(v) ?? 0) + 1)
+  const threshold = 1 / n
   for (const c of counts.values()) {
     const p = c / n
+    if (p < threshold) continue
     const stderr = Math.sqrt((p * (1 - p)) / n)
-    if (stderr > target) return false
+    if (stderr > targetBinStderr) return false
   }
   return true
 }
