@@ -577,3 +577,180 @@ describe('parameter declarations', () => {
     expect(r.success).toBe(true)
   })
 })
+
+describe('match expression - guard mode', () => {
+  test('basic guard ladder', () => {
+    const r = ProgramParser.parse('match { $a -> 1, $b -> 2, _ -> 3 }')
+    expect(r.success).toBe(true)
+    if (r.success) {
+      const stmt = r.program.statements[0]
+      if (stmt.type === 'expression-statement') {
+        expect(stmt.expr.type).toBe('match-expr')
+        if (stmt.expr.type === 'match-expr') {
+          expect(stmt.expr.value).toBeUndefined()
+          expect(stmt.expr.arms).toHaveLength(3)
+          expect(stmt.expr.arms[0].pattern.kind).toBe('expression')
+          expect(stmt.expr.arms[2].pattern.kind).toBe('wildcard')
+        }
+      }
+    }
+  })
+
+  test('newline-separated arms', () => {
+    const r = ProgramParser.parse('match {\n  $a -> 1\n  $b -> 2\n  _ -> 3\n}')
+    expect(r.success).toBe(true)
+    if (r.success) {
+      const stmt = r.program.statements[0]
+      if (
+        stmt.type === 'expression-statement' &&
+        stmt.expr.type === 'match-expr'
+      ) {
+        expect(stmt.expr.arms).toHaveLength(3)
+      }
+    }
+  })
+
+  test('trailing comma allowed', () => {
+    const r = ProgramParser.parse('match { $a -> 1, _ -> 2, }')
+    expect(r.success).toBe(true)
+  })
+
+  test('arm with guard', () => {
+    const r = ProgramParser.parse('match { $a if $b -> 1, _ -> 2 }')
+    expect(r.success).toBe(true)
+    if (r.success) {
+      const stmt = r.program.statements[0]
+      if (
+        stmt.type === 'expression-statement' &&
+        stmt.expr.type === 'match-expr'
+      ) {
+        expect(stmt.expr.arms[0].guard).toBeDefined()
+      }
+    }
+  })
+
+  test('wildcard with guard', () => {
+    const r = ProgramParser.parse('match { _ if $b -> 1, _ -> 2 }')
+    expect(r.success).toBe(true)
+    if (r.success) {
+      const stmt = r.program.statements[0]
+      if (
+        stmt.type === 'expression-statement' &&
+        stmt.expr.type === 'match-expr'
+      ) {
+        expect(stmt.expr.arms[0].pattern.kind).toBe('wildcard')
+        expect(stmt.expr.arms[0].guard).toBeDefined()
+      }
+    }
+  })
+
+  test('empty match block is parse error', () => {
+    const r = ProgramParser.parse('match { }')
+    expect(r.success).toBe(false)
+  })
+
+  test('match in assignment', () => {
+    const r = ProgramParser.parse('$x = match { true -> 1, _ -> 0 }')
+    expect(r.success).toBe(true)
+    if (r.success) {
+      const stmt = r.program.statements[0]
+      if (stmt.type === 'assignment') {
+        expect(stmt.value.type).toBe('match-expr')
+      }
+    }
+  })
+
+  test('match cannot be used as record key', () => {
+    const r = ProgramParser.parse('{ match: 1 }')
+    expect(r.success).toBe(false)
+  })
+
+  test('underscore cannot be used as record key', () => {
+    const r = ProgramParser.parse('{ _: 1 }')
+    expect(r.success).toBe(false)
+  })
+
+  test('underscore-prefixed identifier is not a wildcard', () => {
+    // _foo would be a record key, not a wildcard - record key parse should
+    // accept underscore-prefixed identifiers as normal field names.
+    const r = ProgramParser.parse('{ _foo: 1 }')
+    expect(r.success).toBe(true)
+  })
+})
+
+describe('match expression - value mode', () => {
+  test('basic value match', () => {
+    const r = ProgramParser.parse('match $x { 1 -> "a", 2 -> "b", _ -> "c" }')
+    expect(r.success).toBe(true)
+    if (r.success) {
+      const stmt = r.program.statements[0]
+      if (
+        stmt.type === 'expression-statement' &&
+        stmt.expr.type === 'match-expr'
+      ) {
+        expect(stmt.expr.value).toBeDefined()
+        expect(stmt.expr.arms).toHaveLength(3)
+      }
+    }
+  })
+
+  test('value match with guards', () => {
+    const r = ProgramParser.parse(
+      'match $weapon { "sword" if $crit -> 1, "sword" -> 2, _ -> 0 }',
+    )
+    expect(r.success).toBe(true)
+    if (r.success) {
+      const stmt = r.program.statements[0]
+      if (
+        stmt.type === 'expression-statement' &&
+        stmt.expr.type === 'match-expr'
+      ) {
+        expect(stmt.expr.arms[0].guard).toBeDefined()
+        expect(stmt.expr.arms[1].guard).toBeUndefined()
+      }
+    }
+  })
+
+  test('match with computed pattern', () => {
+    const r = ProgramParser.parse('match $x { $base + 1 -> 1, _ -> 2 }')
+    expect(r.success).toBe(true)
+  })
+
+  test('match value can be complex expression', () => {
+    const r = ProgramParser.parse('match $a + $b { 5 -> "five", _ -> "other" }')
+    expect(r.success).toBe(true)
+    if (r.success) {
+      const stmt = r.program.statements[0]
+      if (
+        stmt.type === 'expression-statement' &&
+        stmt.expr.type === 'match-expr'
+      ) {
+        expect(stmt.expr.value?.type).toBe('binary-expr')
+      }
+    }
+  })
+
+  test('match with dice pattern', () => {
+    const r = ProgramParser.parse('match $x { `d6` -> 1, _ -> 2 }')
+    expect(r.success).toBe(true)
+  })
+
+  test('subtraction in body still parses', () => {
+    const r = ProgramParser.parse('match { true -> 5 - 3, _ -> 0 }')
+    expect(r.success).toBe(true)
+    if (r.success) {
+      const stmt = r.program.statements[0]
+      if (
+        stmt.type === 'expression-statement' &&
+        stmt.expr.type === 'match-expr'
+      ) {
+        expect(stmt.expr.arms[0].body.type).toBe('binary-expr')
+      }
+    }
+  })
+
+  test('subtraction in pattern still parses', () => {
+    const r = ProgramParser.parse('match $x { 5 - 3 -> "two", _ -> "no" }')
+    expect(r.success).toBe(true)
+  })
+})

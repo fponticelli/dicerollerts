@@ -7,6 +7,9 @@ import {
   type Statement,
   type Expression,
   type BinaryOper,
+  type MatchArm,
+  type MatchExpr,
+  type MatchPattern,
   type ParameterDeclaration,
   type ParameterSpec,
   type ParameterDefault,
@@ -27,6 +30,10 @@ import {
   repeatExpr,
   fieldAccess,
   indexAccess,
+  matchExpr,
+  matchArm,
+  wildcardPattern,
+  expressionPattern,
   parameterDeclaration,
 } from './program'
 
@@ -70,6 +77,7 @@ const RESERVED = new Set([
   'not',
   'repeat',
   'is',
+  'match',
 ])
 
 const ALLOWED_PARAM_FIELDS = new Set([
@@ -411,6 +419,13 @@ class Parser {
         const right = this.parseMulDiv()
         left = binaryExpr('add', left, right)
       } else if (ch === '-') {
+        // Don't consume '->': it's a match-arm arrow, not subtraction
+        if (
+          this.pos + 1 < this.input.length &&
+          this.input[this.pos + 1] === '>'
+        ) {
+          break
+        }
         this.pos++
         this.skipSpaces()
         const right = this.parseMulDiv()
@@ -546,8 +561,114 @@ class Parser {
     if (this.matchKeyword('repeat')) {
       return this.parseRepeat()
     }
+    if (this.matchKeyword('match')) {
+      return this.parseMatchExpr()
+    }
 
     throw new Error(`Unexpected character '${ch}' at position ${this.pos}`)
+  }
+
+  parseMatchExpr(): MatchExpr {
+    this.skipWhitespaceAndComments()
+
+    // Detect mode: if next char is '{', guard mode; else value mode
+    let value: Expression | undefined
+    if (this.pos >= this.input.length) {
+      throw new Error(`Expected '{' or value expression after 'match'`)
+    }
+    if (this.input[this.pos] !== '{') {
+      value = this.parseExpression()
+      this.skipWhitespaceAndComments()
+    }
+
+    this.expect('{')
+    this.skipWhitespaceAndComments()
+
+    const arms: MatchArm[] = []
+    while (this.pos < this.input.length && this.input[this.pos] !== '}') {
+      arms.push(this.parseMatchArm())
+      this.skipWhitespaceAndComments()
+      if (this.pos < this.input.length && this.input[this.pos] === ',') {
+        this.pos++
+        this.skipWhitespaceAndComments()
+      }
+    }
+
+    this.expect('}')
+
+    if (arms.length === 0) {
+      throw new Error(`match block cannot be empty at position ${this.pos}`)
+    }
+
+    return matchExpr(value, arms)
+  }
+
+  parseMatchArm(): MatchArm {
+    this.skipWhitespaceAndComments()
+
+    // Parse pattern: '_' or expression
+    let pattern: MatchPattern
+    if (this.matchWildcard()) {
+      pattern = wildcardPattern
+    } else {
+      const expr = this.parseExpression()
+      pattern = expressionPattern(expr)
+    }
+
+    this.skipSpaces()
+
+    // Optional 'if guard'
+    let guard: Expression | undefined
+    if (this.matchKeyword('if')) {
+      this.skipSpaces()
+      guard = this.parseExpression()
+      this.skipSpaces()
+    }
+
+    // Required '->'
+    this.expectArrow()
+    this.skipWhitespaceAndComments()
+
+    const body = this.parseExpression()
+    return matchArm(pattern, body, guard)
+  }
+
+  matchWildcard(): boolean {
+    const saved = this.pos
+    this.skipSpaces()
+    if (this.pos >= this.input.length || this.input[this.pos] !== '_') {
+      this.pos = saved
+      return false
+    }
+    const after = this.pos + 1
+    // '_foo' or '_1' should NOT match the wildcard
+    if (after < this.input.length && /[a-zA-Z0-9_]/.test(this.input[after])) {
+      this.pos = saved
+      return false
+    }
+    this.pos = after
+    return true
+  }
+
+  matchArrow(): boolean {
+    const saved = this.pos
+    this.skipSpaces()
+    if (
+      this.pos + 1 < this.input.length &&
+      this.input[this.pos] === '-' &&
+      this.input[this.pos + 1] === '>'
+    ) {
+      this.pos += 2
+      return true
+    }
+    this.pos = saved
+    return false
+  }
+
+  expectArrow(): void {
+    if (!this.matchArrow()) {
+      throw new Error(`Expected '->' at position ${this.pos}`)
+    }
   }
 
   parseDiceExpr(): Expression {
@@ -647,6 +768,11 @@ class Parser {
     if (RESERVED.has(key)) {
       throw new Error(
         `'${key}' is a reserved word and cannot be used as a record key at position ${this.pos}`,
+      )
+    }
+    if (key === '_') {
+      throw new Error(
+        `'_' is reserved as the wildcard pattern and cannot be used as a record key at position ${this.pos}`,
       )
     }
     this.skipSpaces()
