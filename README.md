@@ -320,7 +320,17 @@ $roll = `$nD$s`          # rolls 3d6
 
 By convention, uppercase `D` is used for parametric forms, but the parser accepts both. Counts of 0 or fewer return 0; the resolved count is capped at 10000 per expression -- programs that try to roll more (e.g., `\`100000d6\``) throw a clear runtime error.
 
-For variable counts, distribution analysis enumerates over the count's possible values when feasible, falling back to Monte Carlo for large or unbounded distributions.
+**Parametric counts work with modifiers too:**
+
+```
+$n = `d6`
+$attack = `$nD6 keep 1`        # roll N d6, keep highest 1 (where N is itself a roll)
+$pool   = `$nD10 count >= 6`   # variable-size dice pool
+$burst  = `$nD6 explode on 6`  # variable-count exploding dice
+$fate   = `$nDF`                # N Fate dice
+```
+
+The AST holds count and sides compactly regardless of size — `100000d6 keep 1` parses instantly; the runtime cap catches abuse only when you try to roll. Distribution analysis enumerates over the count's possible values when feasible, falling back to Monte Carlo for large or unbounded distributions.
 
 ### Match expressions
 
