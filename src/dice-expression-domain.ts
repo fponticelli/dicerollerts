@@ -30,12 +30,49 @@ function distinctPrimitive<T>(xs: T[]): T[] {
   return Array.from(new Set(xs))
 }
 
+function nDiceCountToString(p: NDiceParam): string {
+  return p.kind === 'literal' ? String(p.value) : `$${p.name}`
+}
+
+function homogeneousHeadToString(count: NDiceParam, sides: NDiceParam): string {
+  // All-literal -> use lowercase 'd' to match standard dice notation
+  // (e.g. `3d6`, `d%`). Otherwise uppercase 'D' to indicate parametric form.
+  if (count.kind === 'literal' && sides.kind === 'literal') {
+    return DE.diceToString(count.value, sides.value)
+  }
+  return `${nDiceCountToString(count)}D${nDiceCountToString(sides)}`
+}
+
+function homogeneousCustomHeadToString(
+  count: NDiceParam,
+  faces: number[],
+): string {
+  const dieStr = customDieToString(faces)
+  if (count.kind === 'literal') {
+    return count.value === 1 ? dieStr : `${count.value}${dieStr}`
+  }
+  // Parametric: render `dF` -> `$nameDF` (uppercase D for parametric form).
+  // For `d{...}`, render as `$nameD{...}`.
+  const sidesPart = dieStr.startsWith('d') ? 'D' + dieStr.slice(1) : dieStr
+  return `$${count.name}${sidesPart}`
+}
+
 function diceListWithFilterToString(dlwf: DiceListWithFilter): string {
   if (dlwf.list.type === 'filterable-dice-array') {
     return DE.sidesToString(dlwf.list.dice) + DE.diceFilterToString(dlwf.filter)
   } else if (dlwf.list.type === 'filterable-dice-expressions') {
     return (
       DE.expressionsToString(dlwf.list.exprs) +
+      DE.diceFilterToString(dlwf.filter)
+    )
+  } else if (dlwf.list.type === 'filterable-homogeneous') {
+    return (
+      homogeneousHeadToString(dlwf.list.count, dlwf.list.sides) +
+      DE.diceFilterToString(dlwf.filter)
+    )
+  } else if (dlwf.list.type === 'filterable-homogeneous-custom') {
+    return (
+      homogeneousCustomHeadToString(dlwf.list.count, dlwf.list.faces) +
       DE.diceFilterToString(dlwf.filter)
     )
   } else {
@@ -50,6 +87,19 @@ function diceReduceToString(dr: DiceReduce): string {
     return diceListWithFilterToString(dr.reduceable)
   } else if (dr.reduceable.type === 'dice-list-with-map') {
     return DE.diceBagToString(dr.reduceable.dice, dr.reduceable.functor)
+  } else if (dr.reduceable.type === 'dice-list-with-map-homogeneous') {
+    return DE.diceBagHomogeneousToString(
+      dr.reduceable.count,
+      dr.reduceable.sides,
+      dr.reduceable.functor,
+    )
+  } else if (dr.reduceable.type === 'homogeneous-dice-expressions') {
+    return homogeneousHeadToString(dr.reduceable.count, dr.reduceable.sides)
+  } else if (dr.reduceable.type === 'homogeneous-custom-dice') {
+    return homogeneousCustomHeadToString(
+      dr.reduceable.count,
+      dr.reduceable.faces,
+    )
   } else {
     throw new Error(`Unknown reduceable: ${String(dr)}`)
   }
@@ -87,18 +137,8 @@ function unaryOpToString(op: DiceUnOp): string {
   }
 }
 
-function nDiceParamToString(p: NDiceParam): string {
-  return p.kind === 'literal' ? String(p.value) : `$${p.name}`
-}
-
 function nDiceToString(expr: NDice): string {
-  // All-literal -> use lowercase 'd' to match standard dice notation,
-  // and apply existing shortcuts (d% for sides=100, drop count when count=1).
-  if (expr.count.kind === 'literal' && expr.sides.kind === 'literal') {
-    return DE.diceToString(expr.count.value, expr.sides.value)
-  }
-  // Parametric form -> uppercase D by convention.
-  return `${nDiceParamToString(expr.count)}D${nDiceParamToString(expr.sides)}`
+  return homogeneousHeadToString(expr.count, expr.sides)
 }
 
 export const DE = {
@@ -139,8 +179,20 @@ export const DE = {
   },
 
   diceBagToString(dice: Sides[], functor: DiceFunctor): string {
+    return DE.diceBagSuffix(DE.sidesToString(dice), functor)
+  },
+
+  diceBagHomogeneousToString(
+    count: NDiceParam,
+    sides: NDiceParam,
+    functor: DiceFunctor,
+  ): string {
+    const head = homogeneousHeadToString(count, sides)
+    return DE.diceBagSuffix(head, functor)
+  },
+
+  diceBagSuffix(head: string, functor: DiceFunctor): string {
     if (functor.type === 'emphasis') {
-      const sides = DE.sidesToString(dice)
       const suffix = ((): string[] => {
         switch (functor.furthestFrom) {
           case 'average':
@@ -154,10 +206,8 @@ export const DE = {
       } else if (functor.tieBreaker === 'low') {
         suffix.push('low')
       }
-
-      return `${sides} ${suffix.join(' ')}`
+      return `${head} ${suffix.join(' ')}`
     }
-    const sides = DE.sidesToString(dice)
     const suffix = (() => {
       switch (functor.type) {
         case 'explode':
@@ -175,7 +225,7 @@ export const DE = {
         ].filter((x) => x !== ''),
       )
       .join(' ')
-    return `${sides} ${suffix}`
+    return `${head} ${suffix}`
   },
 
   sidesToString(dice: Sides[]): string {
@@ -313,17 +363,26 @@ export const DE = {
         )
       case 'dice-list-with-filter': {
         const list = dr.list
-        if (list.type === 'filterable-dice-array') {
-          return list.dice.length
-        } else {
-          return list.exprs.reduce(
-            (acc, expr) => acc + DE.calculateBasicRolls(expr),
-            0,
-          )
+        switch (list.type) {
+          case 'filterable-dice-array':
+            return list.dice.length
+          case 'filterable-dice-expressions':
+            return list.exprs.reduce(
+              (acc, expr) => acc + DE.calculateBasicRolls(expr),
+              0,
+            )
+          case 'filterable-homogeneous':
+          case 'filterable-homogeneous-custom':
+            return list.count.kind === 'literal' ? list.count.value : 1
         }
+        return 0
       }
       case 'dice-list-with-map':
         return dr.dice.length
+      case 'dice-list-with-map-homogeneous':
+      case 'homogeneous-dice-expressions':
+      case 'homogeneous-custom-dice':
+        return dr.count.kind === 'literal' ? dr.count.value : 1
     }
   },
 
@@ -409,18 +468,59 @@ export const DE = {
           dr.dice.map((v) => DE.checkFunctor(v, dr.functor)).flat(),
         )
       }
+      case 'dice-list-with-map-homogeneous': {
+        const acc: ValidationMessage[] = []
+        if (dr.sides.kind === 'literal') {
+          if (dr.sides.value <= 0) {
+            acc.push(insufficientSides(dr.sides.value))
+          } else {
+            acc.push(...DE.checkFunctor(dr.sides.value, dr.functor))
+          }
+        }
+        return acc
+      }
+      case 'homogeneous-dice-expressions': {
+        const acc: ValidationMessage[] = []
+        if (dr.sides.kind === 'literal' && dr.sides.value <= 0) {
+          acc.push(insufficientSides(dr.sides.value))
+        }
+        return acc
+      }
+      case 'homogeneous-custom-dice': {
+        const acc: ValidationMessage[] = []
+        if (dr.faces.length === 0) acc.push(emptyFaces())
+        return acc
+      }
       case 'dice-list-with-filter': {
         const acc: ValidationMessage[] = []
-        const len =
-          dr.list.type === 'filterable-dice-array'
-            ? dr.list.dice.length
-            : dr.list.exprs.length
+        const list = dr.list
+        let len: number | null
+        switch (list.type) {
+          case 'filterable-dice-array':
+            len = list.dice.length
+            break
+          case 'filterable-dice-expressions':
+            len = list.exprs.length
+            break
+          case 'filterable-homogeneous':
+          case 'filterable-homogeneous-custom':
+            // Variable count not known until evaluation; skip too-many checks.
+            len = list.count.kind === 'literal' ? list.count.value : null
+            if (list.type === 'filterable-homogeneous-custom') {
+              if (list.faces.length === 0) acc.push(emptyFaces())
+            } else if (list.sides.kind === 'literal' && list.sides.value <= 0) {
+              acc.push(insufficientSides(list.sides.value))
+            }
+            break
+        }
         if (dr.filter.value < 1) {
           acc.push(dropOrKeepShouldBePositive())
-        } else if (dr.filter.type === 'drop' && dr.filter.value >= len) {
-          acc.push(tooManyDrops(len, dr.filter.value))
-        } else if (dr.filter.type === 'keep' && dr.filter.value > len) {
-          acc.push(tooManyKeeps(len, dr.filter.value))
+        } else if (len !== null) {
+          if (dr.filter.type === 'drop' && dr.filter.value >= len) {
+            acc.push(tooManyDrops(len, dr.filter.value))
+          } else if (dr.filter.type === 'keep' && dr.filter.value > len) {
+            acc.push(tooManyKeeps(len, dr.filter.value))
+          }
         }
         return acc
       }

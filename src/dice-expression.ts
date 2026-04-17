@@ -192,10 +192,81 @@ export function diceListWithMap(
   }
 }
 
+/**
+ * Compact representation of N homogeneous dice in a "mapeable" position
+ * (e.g. `Nd6 explode on 6`, `Nd6 reroll on 1`). Materializes individual rolls
+ * at evaluation time rather than at parse time.
+ */
+export interface DiceListWithMapHomogeneous {
+  type: 'dice-list-with-map-homogeneous'
+  count: NDiceParam
+  sides: NDiceParam
+  functor: DiceFunctor
+}
+
+export function diceListWithMapHomogeneous(
+  count: NDiceParam,
+  sides: NDiceParam,
+  functor: DiceFunctor,
+): DiceListWithMapHomogeneous {
+  return {
+    type: 'dice-list-with-map-homogeneous',
+    count,
+    sides,
+    functor,
+  }
+}
+
+/**
+ * Compact representation of N homogeneous dice in a "reducer" position
+ * (e.g. `Nd6 max`, `Nd6 sum`, `Nd6 count >= 4`). Materializes individual
+ * rolls at evaluation time rather than at parse time.
+ */
+export interface HomogeneousDiceExpressions {
+  type: 'homogeneous-dice-expressions'
+  count: NDiceParam
+  sides: NDiceParam
+}
+
+export function homogeneousDiceExpressions(
+  count: NDiceParam,
+  sides: NDiceParam,
+): HomogeneousDiceExpressions {
+  return {
+    type: 'homogeneous-dice-expressions',
+    count,
+    sides,
+  }
+}
+
+/**
+ * Compact representation of N copies of a custom-faced die (e.g. `NdF`)
+ * in a reducer or filterable position. The dice all share `faces`.
+ */
+export interface HomogeneousCustomDice {
+  type: 'homogeneous-custom-dice'
+  count: NDiceParam
+  faces: number[]
+}
+
+export function homogeneousCustomDice(
+  count: NDiceParam,
+  faces: number[],
+): HomogeneousCustomDice {
+  return {
+    type: 'homogeneous-custom-dice',
+    count,
+    faces,
+  }
+}
+
 export type DiceReduceable =
   | DiceExpressions
   | DiceListWithFilter
   | DiceListWithMap
+  | DiceListWithMapHomogeneous
+  | HomogeneousDiceExpressions
+  | HomogeneousCustomDice
 
 export interface FilterableDiceArray {
   type: 'filterable-dice-array'
@@ -223,7 +294,54 @@ export function filterableDiceExpressions(
   }
 }
 
-export type DiceFilterable = FilterableDiceArray | FilterableDiceExpressions
+/**
+ * Compact representation of N homogeneous dice in a "filterable" position
+ * (e.g. `Nd6 keep N`, `Nd6 drop N`). Materializes individual rolls at
+ * evaluation time rather than at parse time.
+ */
+export interface FilterableHomogeneous {
+  type: 'filterable-homogeneous'
+  count: NDiceParam
+  sides: NDiceParam
+}
+
+export function filterableHomogeneous(
+  count: NDiceParam,
+  sides: NDiceParam,
+): FilterableHomogeneous {
+  return {
+    type: 'filterable-homogeneous',
+    count,
+    sides,
+  }
+}
+
+/**
+ * Compact representation of N copies of a custom-faced die (e.g. `NdF`)
+ * in a filterable position.
+ */
+export interface FilterableHomogeneousCustom {
+  type: 'filterable-homogeneous-custom'
+  count: NDiceParam
+  faces: number[]
+}
+
+export function filterableHomogeneousCustom(
+  count: NDiceParam,
+  faces: number[],
+): FilterableHomogeneousCustom {
+  return {
+    type: 'filterable-homogeneous-custom',
+    count,
+    faces,
+  }
+}
+
+export type DiceFilterable =
+  | FilterableDiceArray
+  | FilterableDiceExpressions
+  | FilterableHomogeneous
+  | FilterableHomogeneousCustom
 
 export interface Drop {
   type: 'drop'

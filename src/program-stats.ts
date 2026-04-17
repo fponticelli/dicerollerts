@@ -923,12 +923,36 @@ function countDiceVarRefs(
         case 'dice-expressions':
           for (const e of r.exprs) countDiceVarRefs(e, onName)
           return
-        case 'dice-list-with-filter':
-          if (r.list.type !== 'filterable-dice-array') {
-            for (const e of r.list.exprs) countDiceVarRefs(e, onName)
+        case 'dice-list-with-filter': {
+          const list = r.list
+          switch (list.type) {
+            case 'filterable-dice-array':
+              return
+            case 'filterable-dice-expressions':
+              for (const e of list.exprs) countDiceVarRefs(e, onName)
+              return
+            case 'filterable-homogeneous':
+              if (list.count.kind === 'variable') onName(list.count.name)
+              if (list.sides.kind === 'variable') onName(list.sides.name)
+              return
+            case 'filterable-homogeneous-custom':
+              if (list.count.kind === 'variable') onName(list.count.name)
+              return
           }
           return
+        }
         case 'dice-list-with-map':
+          return
+        case 'dice-list-with-map-homogeneous':
+          if (r.count.kind === 'variable') onName(r.count.name)
+          if (r.sides.kind === 'variable') onName(r.sides.name)
+          return
+        case 'homogeneous-dice-expressions':
+          if (r.count.kind === 'variable') onName(r.count.name)
+          if (r.sides.kind === 'variable') onName(r.sides.name)
+          return
+        case 'homogeneous-custom-dice':
+          if (r.count.kind === 'variable') onName(r.count.name)
           return
       }
     }
@@ -2155,11 +2179,30 @@ function diceExpressionHasVarRef(expr: DiceExpression): boolean {
       switch (r.type) {
         case 'dice-expressions':
           return r.exprs.some(diceExpressionHasVarRef)
-        case 'dice-list-with-filter':
-          if (r.list.type === 'filterable-dice-array') return false
-          return r.list.exprs.some(diceExpressionHasVarRef)
+        case 'dice-list-with-filter': {
+          const list = r.list
+          switch (list.type) {
+            case 'filterable-dice-array':
+              return false
+            case 'filterable-dice-expressions':
+              return list.exprs.some(diceExpressionHasVarRef)
+            case 'filterable-homogeneous':
+              return (
+                list.count.kind === 'variable' || list.sides.kind === 'variable'
+              )
+            case 'filterable-homogeneous-custom':
+              return list.count.kind === 'variable'
+          }
+          return false
+        }
         case 'dice-list-with-map':
           return false
+        case 'dice-list-with-map-homogeneous':
+          return r.count.kind === 'variable' || r.sides.kind === 'variable'
+        case 'homogeneous-dice-expressions':
+          return r.count.kind === 'variable' || r.sides.kind === 'variable'
+        case 'homogeneous-custom-dice':
+          return r.count.kind === 'variable'
       }
     }
   }

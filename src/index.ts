@@ -39,6 +39,11 @@ export {
   nDice,
   nDiceLit,
   nDiceVar,
+  diceListWithMapHomogeneous,
+  homogeneousDiceExpressions,
+  homogeneousCustomDice,
+  filterableHomogeneous,
+  filterableHomogeneousCustom,
 } from './dice-expression'
 
 export type {
@@ -86,6 +91,11 @@ export type {
   DiceVariableRef,
   NDice,
   NDiceParam,
+  DiceListWithMapHomogeneous,
+  HomogeneousDiceExpressions,
+  HomogeneousCustomDice,
+  FilterableHomogeneous,
+  FilterableHomogeneousCustom,
 } from './dice-expression'
 
 export { DiceParser } from './dice-parser'

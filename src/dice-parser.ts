@@ -40,6 +40,11 @@ import {
   nDiceLit,
   nDiceVar,
   diceVariableRef as makeDiceVariableRef,
+  filterableHomogeneous,
+  filterableHomogeneousCustom,
+  diceListWithMapHomogeneous,
+  homogeneousDiceExpressions,
+  homogeneousCustomDice,
 } from './dice-expression'
 import { CustomError, type DecodeError } from 'partsing/error'
 import { buildParseErrors, type ParseWithErrorsResult } from './parse-error'
@@ -257,9 +262,14 @@ const die = oneOf(
 // Match a `$name` variable reference. Names follow the same rules as the
 // program parser: lowercase letter or underscore, followed by lowercase,
 // digit, or underscore.
-const VAR_NAME = regexp(/^\$([a-z_][a-z0-9_]*)/, 1).withFailure(
-  new CustomError('variable reference'),
-)
+const VAR_NAME: Decoder<TextInput, string, DecodeError> = regexp(
+  /^\$([a-z_][a-z0-9_]*)/,
+  1,
+).withFailure(new CustomError('variable reference')) as Decoder<
+  TextInput,
+  string,
+  DecodeError
+>
 
 const variableRefExpr = VAR_NAME.map(makeDiceVariableRef)
 
@@ -267,6 +277,18 @@ const variableRefExpr = VAR_NAME.map(makeDiceVariableRef)
 const nDiceCount: Decoder<TextInput, NDiceParam, DecodeError> = oneOf(
   positive.map(nDiceLit) as Decoder<TextInput, NDiceParam, DecodeError>,
   VAR_NAME.map(nDiceVar) as Decoder<TextInput, NDiceParam, DecodeError>,
+)
+
+// Sides position for parametric `$varD<sides>` chains used by reducer/
+// filterable/mapeable paths. Accepts %, $variable, or literal positive int.
+const sidesParam: Decoder<TextInput, NDiceParam, DecodeError> = oneOf(
+  PERCENT.withResult(nDiceLit(100)) as Decoder<
+    TextInput,
+    NDiceParam,
+    DecodeError
+  >,
+  VAR_NAME.map(nDiceVar) as Decoder<TextInput, NDiceParam, DecodeError>,
+  positive.map(nDiceLit) as Decoder<TextInput, NDiceParam, DecodeError>,
 )
 
 // Reducer keywords that, when following an n-dice form, indicate the
@@ -455,40 +477,81 @@ const commaSeparated = <T>(
 
 const diceExpressions = lazy(
   (): Decoder<TextInput, DiceReduceable, DecodeError> => {
-    return oneOf(
+    const literalHomogeneous: Decoder<TextInput, DiceReduceable, DecodeError> =
       positive.flatMap((rolls) => {
-        return die.map((sides) => {
-          const dice = [...Array(rolls)].map((_) => makeDie(sides))
-          return makeDiceExpressions(...dice)
-        })
-      }),
-      commaSeparated(expression).map((v) => makeDiceExpressions(...v)),
-    )
+        return die.map(
+          (sides): DiceReduceable =>
+            homogeneousDiceExpressions(nDiceLit(rolls), nDiceLit(sides)),
+        )
+      })
+    const variableHomogeneous: Decoder<TextInput, DiceReduceable, DecodeError> =
+      VAR_NAME.flatMap((countVar) => {
+        return D.pickNext(
+          sidesParam.map(
+            (sides): DiceReduceable =>
+              homogeneousDiceExpressions(nDiceVar(countVar), sides),
+          ),
+        )
+      })
+    const heterogeneous: Decoder<TextInput, DiceReduceable, DecodeError> =
+      commaSeparated(expression).map(
+        (v): DiceReduceable => makeDiceExpressions(...v),
+      )
+    return oneOf(literalHomogeneous, variableHomogeneous, heterogeneous)
   },
 )
 
 const diceFilterable = lazy(
   (): Decoder<TextInput, DiceReduceable, DecodeError> => {
-    return oneOf(
+    const litFate: Decoder<TextInput, DiceFilterable, DecodeError> =
       positive.flatMap((rolls) => {
         return D.skipNext(matchChar('F')).withResult(
-          filterableDiceExpressions(
-            ...Array.from({ length: rolls }, () => makeCustomDie([-1, 0, 1])),
+          filterableHomogeneousCustom(
+            nDiceLit(rolls),
+            [-1, 0, 1],
           ) as DiceFilterable,
         )
-      }),
+      })
+    const varFate: Decoder<TextInput, DiceFilterable, DecodeError> =
+      VAR_NAME.flatMap((countVar) => {
+        return D.skipNext(matchChar('F')).withResult(
+          filterableHomogeneousCustom(
+            nDiceVar(countVar),
+            [-1, 0, 1],
+          ) as DiceFilterable,
+        )
+      })
+    const litHomogeneous: Decoder<TextInput, DiceFilterable, DecodeError> =
       positive.flatMap((rolls) => {
-        return die.map((sides) => {
-          const dice = [...Array(rolls)].map((_) => sides)
-          return filterableDiceArray(dice) as DiceFilterable
-        })
-      }),
+        return die.map(
+          (sides): DiceFilterable =>
+            filterableHomogeneous(nDiceLit(rolls), nDiceLit(sides)),
+        )
+      })
+    const varHomogeneous: Decoder<TextInput, DiceFilterable, DecodeError> =
+      VAR_NAME.flatMap((countVar) => {
+        return D.pickNext(
+          sidesParam.map(
+            (sides): DiceFilterable =>
+              filterableHomogeneous(nDiceVar(countVar), sides),
+          ),
+        )
+      })
+    const heteroDice: Decoder<TextInput, DiceFilterable, DecodeError> =
       commaSeparated(die).map(
-        (dice) => filterableDiceArray(dice) as DiceFilterable,
-      ),
+        (dice): DiceFilterable => filterableDiceArray(dice),
+      )
+    const heteroExprs: Decoder<TextInput, DiceFilterable, DecodeError> =
       commaSeparated(expression).map(
-        (v) => filterableDiceExpressions(...v) as DiceFilterable,
-      ),
+        (v): DiceFilterable => filterableDiceExpressions(...v),
+      )
+    return oneOf(
+      litFate,
+      varFate,
+      litHomogeneous,
+      varHomogeneous,
+      heteroDice,
+      heteroExprs,
     ).flatMap((filterable) => {
       return OWS.pickNext(
         oneOf(
@@ -508,23 +571,59 @@ const diceFilterable = lazy(
   },
 )
 
+// Helper: parses a homogeneous "N copies of d<sides>" token in mapeable
+// position. Returns either a compact homogeneous form or a heterogeneous
+// array (single die expressed as a 1-element array).
+type MapeableHead =
+  | { kind: 'homogeneous'; count: NDiceParam; sides: NDiceParam }
+  | { kind: 'array'; dice: number[] }
+
 const diceMapeable = lazy(
   (): Decoder<TextInput, DiceReduceable, DecodeError> => {
-    return oneOf(
+    const litHomogeneous: Decoder<TextInput, MapeableHead, DecodeError> =
       positive.flatMap((rolls) => {
-        return die.map((sides) => {
-          return [...Array(rolls)].map((_) => sides)
-        })
-      }),
-      commaSeparated(die),
+        return die.map(
+          (sides): MapeableHead => ({
+            kind: 'homogeneous',
+            count: nDiceLit(rolls),
+            sides: nDiceLit(sides),
+          }),
+        )
+      })
+    const varHomogeneous: Decoder<TextInput, MapeableHead, DecodeError> =
+      VAR_NAME.flatMap((countVar) => {
+        return D.pickNext(
+          sidesParam.map(
+            (sides): MapeableHead => ({
+              kind: 'homogeneous',
+              count: nDiceVar(countVar),
+              sides,
+            }),
+          ),
+        )
+      })
+    const heteroDice: Decoder<TextInput, MapeableHead, DecodeError> =
+      commaSeparated(die).map((dice): MapeableHead => ({ kind: 'array', dice }))
+    const explicitOneDie: Decoder<TextInput, MapeableHead, DecodeError> =
       matchChar('1')
         .pickNext(die)
-        .map((v) => [v]),
-      die.map((v) => [v]),
-    ).flatMap((arr) => {
+        .map((v): MapeableHead => ({ kind: 'array', dice: [v] }))
+    const singleDie: Decoder<TextInput, MapeableHead, DecodeError> = die.map(
+      (v): MapeableHead => ({ kind: 'array', dice: [v] }),
+    )
+    return oneOf(
+      litHomogeneous,
+      varHomogeneous,
+      heteroDice,
+      explicitOneDie,
+      singleDie,
+    ).flatMap((head) => {
       return OWS.pickNext(
-        diceFunctor.map((functor) => {
-          return diceListWithMap(arr, functor)
+        diceFunctor.map((functor): DiceReduceable => {
+          if (head.kind === 'homogeneous') {
+            return diceListWithMapHomogeneous(head.count, head.sides, functor)
+          }
+          return diceListWithMap(head.dice, functor)
         }),
       )
     })
@@ -543,40 +642,76 @@ const customDieFaces = D.skipNext(matchChar('{'))
 
 const customDieExpression = customDieFaces.map(makeCustomDie)
 
-const fateDieExpression = oneOf(
+const litFate: Decoder<TextInput, DiceExpression, DecodeError> =
   positive.flatMap((count) => {
     return D.skipNext(matchChar('F')).withResult(
       count === 1
-        ? makeCustomDie([-1, 0, 1])
-        : makeDiceReduce(
-            makeDiceExpressions(
-              ...Array.from({ length: count }, () => makeCustomDie([-1, 0, 1])),
-            ),
+        ? (makeCustomDie([-1, 0, 1]) as DiceExpression)
+        : // Compact homogeneous-custom form: never expands at parse time.
+          (makeDiceReduce(
+            homogeneousCustomDice(nDiceLit(count), [-1, 0, 1]),
             'sum' as DiceReducer,
-          ),
+          ) as DiceExpression),
     )
-  }),
-  D.skipNext(matchChar('F')).withResult(makeCustomDie([-1, 0, 1])),
-)
+  })
+const varFate: Decoder<TextInput, DiceExpression, DecodeError> =
+  VAR_NAME.flatMap((countVar) => {
+    return D.skipNext(matchChar('F')).withResult(
+      makeDiceReduce(
+        homogeneousCustomDice(nDiceVar(countVar), [-1, 0, 1]),
+        'sum' as DiceReducer,
+      ) as DiceExpression,
+    )
+  })
+const bareFate: Decoder<TextInput, DiceExpression, DecodeError> = D.skipNext(
+  matchChar('F'),
+).withResult(makeCustomDie([-1, 0, 1]) as DiceExpression)
+const fateDieExpression = oneOf(litFate, varFate, bareFate)
 
 const diceCountShorthand = lazy(
   (): Decoder<TextInput, DiceReduce, DecodeError> => {
-    return positive.flatMap((rolls) => {
-      return (die as Decoder<TextInput, number, DecodeError>).flatMap(
-        (sides) => {
+    const literal: Decoder<TextInput, DiceReduce, DecodeError> =
+      positive.flatMap((rolls) => {
+        return (die as Decoder<TextInput, number, DecodeError>).flatMap(
+          (sides) => {
+            return matchChar('c')
+              .skipNext(OWS)
+              .pickNext(positive)
+              .map(
+                (v): DiceReduce =>
+                  makeDiceReduce(
+                    homogeneousDiceExpressions(
+                      nDiceLit(rolls),
+                      nDiceLit(sides),
+                    ),
+                    {
+                      type: 'count' as const,
+                      threshold: valueOrMore(v),
+                    } as CountReducer,
+                  ),
+              )
+          },
+        )
+      })
+    const variable: Decoder<TextInput, DiceReduce, DecodeError> =
+      VAR_NAME.flatMap((countVar) => {
+        return D.pickNext(sidesParam).flatMap((sides) => {
           return matchChar('c')
             .skipNext(OWS)
             .pickNext(positive)
-            .map((v) => {
-              const dice = Array.from({ length: rolls }, () => makeDie(sides))
-              return makeDiceReduce(makeDiceExpressions(...dice), {
-                type: 'count' as const,
-                threshold: valueOrMore(v),
-              } as CountReducer)
-            })
-        },
-      )
-    })
+            .map(
+              (v): DiceReduce =>
+                makeDiceReduce(
+                  homogeneousDiceExpressions(nDiceVar(countVar), sides),
+                  {
+                    type: 'count' as const,
+                    threshold: valueOrMore(v),
+                  } as CountReducer,
+                ),
+            )
+        })
+      })
+    return oneOf(literal, variable)
   },
 )
 

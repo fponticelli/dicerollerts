@@ -244,6 +244,37 @@ function distributeEmphasis(
   return dist
 }
 
+function resolveLiteralCount(
+  p: import('./dice-expression').NDiceParam,
+): number {
+  if (p.kind !== 'literal') {
+    throw new Error(
+      `Cannot compute distribution for parametric dice with variable count $${p.name}`,
+    )
+  }
+  return p.value
+}
+
+function resolveLiteralSides(
+  p: import('./dice-expression').NDiceParam,
+): number {
+  if (p.kind !== 'literal') {
+    throw new Error(
+      `Cannot compute distribution for parametric dice with variable sides $${p.name}`,
+    )
+  }
+  return p.value
+}
+
+function customDieDistribution(faces: number[]): Distribution {
+  const dist: Distribution = new Map()
+  const p = 1 / faces.length
+  for (const f of faces) {
+    dist.set(f, (dist.get(f) ?? 0) + p)
+  }
+  return dist
+}
+
 function distributeReduceable(
   reduceable: DiceReduceable,
   reducer: DiceReducer,
@@ -253,15 +284,66 @@ function distributeReduceable(
       const subDists = reduceable.exprs.map(distributionOf)
       return reduceDistributions(subDists, reducer)
     }
+    case 'homogeneous-dice-expressions': {
+      const count = resolveLiteralCount(reduceable.count)
+      const sides = resolveLiteralSides(reduceable.sides)
+      if (count <= 0) {
+        return new Map([[reduceValues([], reducer), 1]])
+      }
+      if (sides <= 0) {
+        throw new Error(`dice sides must be positive, got ${sides}`)
+      }
+      const oneDie: Distribution = new Map()
+      const p = 1 / sides
+      for (let i = 1; i <= sides; i++) oneDie.set(i, p)
+      const subDists = Array.from({ length: count }, () => oneDie)
+      return reduceDistributions(subDists, reducer)
+    }
+    case 'homogeneous-custom-dice': {
+      const count = resolveLiteralCount(reduceable.count)
+      if (count <= 0) {
+        return new Map([[reduceValues([], reducer), 1]])
+      }
+      if (reduceable.faces.length === 0) {
+        throw new Error('custom die must have at least one face')
+      }
+      const oneDie = customDieDistribution(reduceable.faces)
+      const subDists = Array.from({ length: count }, () => oneDie)
+      return reduceDistributions(subDists, reducer)
+    }
     case 'dice-list-with-filter': {
       // Enumerate all combinations from the filterable list
       let subDists: Distribution[]
-      if (reduceable.list.type === 'filterable-dice-array') {
-        subDists = reduceable.list.dice.map((sides) =>
-          distributionOf({ type: 'die', sides }),
-        )
-      } else {
-        subDists = reduceable.list.exprs.map(distributionOf)
+      const list = reduceable.list
+      switch (list.type) {
+        case 'filterable-dice-array':
+          subDists = list.dice.map((sides) =>
+            distributionOf({ type: 'die', sides }),
+          )
+          break
+        case 'filterable-dice-expressions':
+          subDists = list.exprs.map(distributionOf)
+          break
+        case 'filterable-homogeneous': {
+          const count = resolveLiteralCount(list.count)
+          const sides = resolveLiteralSides(list.sides)
+          if (sides <= 0) {
+            throw new Error(`dice sides must be positive, got ${sides}`)
+          }
+          subDists = Array.from({ length: count }, () =>
+            distributionOf({ type: 'die', sides }),
+          )
+          break
+        }
+        case 'filterable-homogeneous-custom': {
+          const count = resolveLiteralCount(list.count)
+          if (list.faces.length === 0) {
+            throw new Error('custom die must have at least one face')
+          }
+          const oneDie = customDieDistribution(list.faces)
+          subDists = Array.from({ length: count }, () => oneDie)
+          break
+        }
       }
       // Enumerate all combinations, apply filter, then reduce
       const allCombos = enumerateCombinations(subDists)
@@ -295,6 +377,19 @@ function distributeReduceable(
         distributeFunctor(sides, functor),
       )
       return reduceDistributions(dieDists, reducer)
+    }
+    case 'dice-list-with-map-homogeneous': {
+      const count = resolveLiteralCount(reduceable.count)
+      const sides = resolveLiteralSides(reduceable.sides)
+      if (count <= 0) {
+        return new Map([[reduceValues([], reducer), 1]])
+      }
+      if (sides <= 0) {
+        throw new Error(`dice sides must be positive, got ${sides}`)
+      }
+      const oneDist = distributeFunctor(sides, reduceable.functor)
+      const subDists = Array.from({ length: count }, () => oneDist)
+      return reduceDistributions(subDists, reducer)
     }
   }
 }

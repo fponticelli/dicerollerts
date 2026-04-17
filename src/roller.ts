@@ -8,7 +8,9 @@ import {
   type DiceReduce,
   type NDice,
   type NDiceParam,
+  type DiceFilterable,
   die,
+  customDie,
 } from './dice-expression'
 import {
   keepResult,
@@ -168,35 +170,90 @@ export class Roller {
     this.options = { ...DEFAULT_OPTIONS, ...options }
   }
 
+  private materializeFilterable(filterable: DiceFilterable): RollResult[] {
+    switch (filterable.type) {
+      case 'filterable-dice-array':
+        return filterable.dice.map((d) => this.roll(die(d)))
+      case 'filterable-dice-expressions':
+        return filterable.exprs.map((expr) => this.roll(expr))
+      case 'filterable-homogeneous': {
+        const count = this.resolveNDiceParam(filterable.count, 'count')
+        const sides = this.resolveNDiceParam(filterable.sides, 'sides')
+        if (count > MAX_DICE_COUNT) {
+          throw new Error(`dice count exceeds maximum (${MAX_DICE_COUNT})`)
+        }
+        if (sides <= 0) {
+          throw new Error(`dice sides must be positive, got ${sides}`)
+        }
+        const rolls: RollResult[] = []
+        for (let i = 0; i < count; i++) {
+          rolls.push(this.roll(die(sides)))
+        }
+        return rolls
+      }
+      case 'filterable-homogeneous-custom': {
+        const count = this.resolveNDiceParam(filterable.count, 'count')
+        if (count > MAX_DICE_COUNT) {
+          throw new Error(`dice count exceeds maximum (${MAX_DICE_COUNT})`)
+        }
+        if (filterable.faces.length === 0) {
+          throw new Error('custom die must have at least one face')
+        }
+        const rolls: RollResult[] = []
+        const cd = customDie(filterable.faces)
+        for (let i = 0; i < count; i++) {
+          rolls.push(this.roll(cd))
+        }
+        return rolls
+      }
+    }
+  }
+
   private rollDiceReduce(dr: DiceReduce): RollResult {
     if (dr.reduceable.type === 'dice-expressions') {
       const rolls = dr.reduceable.exprs.map((expr) => this.roll(expr))
       const result = this.reduceRolls(rolls, dr.reducer)
       return diceReduceResult(diceExpressionsResult(rolls), dr.reducer, result)
-    } else if (dr.reduceable.type === 'dice-list-with-filter') {
-      if (dr.reduceable.list.type === 'filterable-dice-array') {
-        const rolls = dr.reduceable.list.dice.map((d) => this.roll(die(d)))
-        const filteredRolls = this.filterRolls(rolls, dr.reduceable.filter)
-        const keepFilteredRolls = this.keepFilteredRolls(filteredRolls)
-        const result = this.reduceRolls(keepFilteredRolls, dr.reducer)
-        return diceReduceResult(
-          diceFilterableResult(filteredRolls, dr.reduceable.filter),
-          dr.reducer,
-          result,
-        )
-      } else if (dr.reduceable.list.type === 'filterable-dice-expressions') {
-        const rolls = dr.reduceable.list.exprs.map((expr) => this.roll(expr))
-        const filteredRolls = this.filterRolls(rolls, dr.reduceable.filter)
-        const keepFilteredRolls = this.keepFilteredRolls(filteredRolls)
-        const result = this.reduceRolls(keepFilteredRolls, dr.reducer)
-        return diceReduceResult(
-          diceFilterableResult(filteredRolls, dr.reduceable.filter),
-          dr.reducer,
-          result,
-        )
-      } else {
-        throw new Error(`Unknown filterable: ${JSON.stringify(dr)}`)
+    } else if (dr.reduceable.type === 'homogeneous-dice-expressions') {
+      const count = this.resolveNDiceParam(dr.reduceable.count, 'count')
+      const sides = this.resolveNDiceParam(dr.reduceable.sides, 'sides')
+      if (count > MAX_DICE_COUNT) {
+        throw new Error(`dice count exceeds maximum (${MAX_DICE_COUNT})`)
       }
+      if (sides <= 0) {
+        throw new Error(`dice sides must be positive, got ${sides}`)
+      }
+      const rolls: RollResult[] = []
+      for (let i = 0; i < count; i++) {
+        rolls.push(this.roll(die(sides)))
+      }
+      const result = this.reduceRolls(rolls, dr.reducer)
+      return diceReduceResult(diceExpressionsResult(rolls), dr.reducer, result)
+    } else if (dr.reduceable.type === 'homogeneous-custom-dice') {
+      const count = this.resolveNDiceParam(dr.reduceable.count, 'count')
+      if (count > MAX_DICE_COUNT) {
+        throw new Error(`dice count exceeds maximum (${MAX_DICE_COUNT})`)
+      }
+      if (dr.reduceable.faces.length === 0) {
+        throw new Error('custom die must have at least one face')
+      }
+      const rolls: RollResult[] = []
+      const cd = customDie(dr.reduceable.faces)
+      for (let i = 0; i < count; i++) {
+        rolls.push(this.roll(cd))
+      }
+      const result = this.reduceRolls(rolls, dr.reducer)
+      return diceReduceResult(diceExpressionsResult(rolls), dr.reducer, result)
+    } else if (dr.reduceable.type === 'dice-list-with-filter') {
+      const rolls = this.materializeFilterable(dr.reduceable.list)
+      const filteredRolls = this.filterRolls(rolls, dr.reduceable.filter)
+      const keepFilteredRolls = this.keepFilteredRolls(filteredRolls)
+      const result = this.reduceRolls(keepFilteredRolls, dr.reducer)
+      return diceReduceResult(
+        diceFilterableResult(filteredRolls, dr.reduceable.filter),
+        dr.reducer,
+        result,
+      )
     } else if (dr.reduceable.type === 'dice-list-with-map') {
       const rolls = dr.reduceable.dice.map((d) => {
         const roll = this.roll(die(d))
@@ -209,6 +266,34 @@ export class Roller {
           throw new Error(`Expected die result, got ${JSON.stringify(roll)}`)
         }
       })
+      const mapped = this.mapRolls(rolls, dr.reduceable.functor)
+      const keepMappedRolls = this.keepMappedRolls(mapped)
+      const result = this.reduceRolls(
+        keepMappedRolls.map(oneResult),
+        dr.reducer,
+      )
+      return diceReduceResult(
+        diceMapeableResult(mapped, dr.reduceable.functor),
+        dr.reducer,
+        result,
+      )
+    } else if (dr.reduceable.type === 'dice-list-with-map-homogeneous') {
+      const count = this.resolveNDiceParam(dr.reduceable.count, 'count')
+      const sides = this.resolveNDiceParam(dr.reduceable.sides, 'sides')
+      if (count > MAX_DICE_COUNT) {
+        throw new Error(`dice count exceeds maximum (${MAX_DICE_COUNT})`)
+      }
+      if (sides <= 0) {
+        throw new Error(`dice sides must be positive, got ${sides}`)
+      }
+      const rolls = []
+      for (let i = 0; i < count; i++) {
+        const roll = this.roll(die(sides))
+        if (roll.type !== 'one-result' || roll.die.type !== 'die-result') {
+          throw new Error(`Expected die result, got ${JSON.stringify(roll)}`)
+        }
+        rolls.push(roll.die)
+      }
       const mapped = this.mapRolls(rolls, dr.reduceable.functor)
       const keepMappedRolls = this.keepMappedRolls(mapped)
       const result = this.reduceRolls(
