@@ -917,11 +917,12 @@ $hit -> `2d6 + 4`
 \_ -> 0
 }
 
-$roll = match $roll*mode {
+$roll = match $roll\*mode {
 "advantage" -> `2d20 keep highest 1`
 "disadvantage" -> `2d20 keep lowest 1`
-* -> `d20`
-}
+
+- -> `d20`
+  }
 
 $damage = match $weapon {
 "sword" if $crit -> `4d6`

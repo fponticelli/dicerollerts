@@ -268,6 +268,8 @@ if (!parsed.success) {
 - Comparison: `==`, `!=`, `>`, `<`, `>=`, `<=`
 - Boolean: `and`, `or`, `not`
 - `if cond then a else b` (else required)
+- `match { pattern -> body, ... }` and `match VALUE { pattern -> body, ... }` for guard ladders and value dispatch
+- Wildcard `_` and optional `if guard` clauses on match arms
 - Records: `{ key: value, ... }`, shorthand `{ $var }`
 - Field access: `$rec.field`
 - Arrays: `[1, 2, 3]`, indexing: `$arr[0]`
@@ -275,6 +277,47 @@ if (!parsed.success) {
 - Parameters: `$name is { default: ..., min, max, enum, label, description }`
 - Comments: `# line comment`
 - Statements separated by newlines
+
+### Match expressions
+
+Replace nested if-else chains with a flat form. Two modes are supported: a guard ladder (no value after `match`) and value dispatch (value after `match`).
+
+Guard mode picks the first arm whose pattern is truthy:
+
+```
+$damage = match {
+  $crit -> `4d6 + 1d4 + 4`
+  $hit  -> `2d6 + 4`
+  _     -> 0
+}
+```
+
+Value mode compares the matched value against each arm's pattern using `==`:
+
+```
+$roll = match $roll_mode {
+  "advantage"    -> `2d20 keep highest 1`
+  "disadvantage" -> `2d20 keep lowest 1`
+  _              -> `d20`
+}
+```
+
+Arms can carry an optional `if guard` clause, evaluated only when the pattern matches:
+
+```
+$damage = match $weapon {
+  "sword" if $crit  -> `4d6`
+  "sword"           -> `2d6`
+  "dagger" if $crit -> `2d4`
+  "dagger"          -> `1d4`
+  _                 -> 0
+}
+```
+
+- `_` is the wildcard (matches anything; use it as a catch-all)
+- Arms are separated by newlines or commas; a trailing separator is allowed
+- The first matching arm wins; remaining arms are not evaluated
+- A trailing `_ -> default` is recommended (otherwise non-matching trials throw a runtime error)
 
 ### Parameters
 
