@@ -6,6 +6,8 @@ import type {
   Value,
   BinaryOper,
   ParameterSpec,
+  RecordExpr,
+  IfExpr,
 } from './program'
 import { Evaluator } from './evaluator'
 import { DiceStats } from './dice-stats'
@@ -669,6 +671,138 @@ function condSymDist<T extends SymValue>(
   return { dist: marginal, sourceIds: [], joint }
 }
 
+// Restrict d's joint to outcomes where `predicate` evaluates to true, then
+// renormalize. The resulting SymDist preserves d's source-id tracking so it
+// can still participate in further combinations.
+//
+// Returns null if:
+//   - the combined joint exceeds MAX_JOINT_SIZE
+//   - no entries satisfy the predicate (P(condition) = 0)
+//
+// Sources may be shared between d and predicate; the routine joins on shared
+// source values and uses the chain rule (just like combineSymDist) to assign
+// joint probability.
+function conditionalizeSymDist<T extends SymValue>(
+  d: SymDist<T>,
+  predicate: SymDist<boolean>,
+): SymDist<T> | null {
+  // Fast path: disjoint sources -> filtering is just on predicate's joint.
+  // d itself doesn't change shape; the marginal of d remains correct since
+  // d is independent of predicate (when sources are disjoint), but the
+  // total mass of the conditioned distribution is P(predicate=true). We can
+  // simply return d if P(true) > 0 because conditioning an independent
+  // distribution on an event leaves its distribution unchanged.
+  let sharesAny = false
+  for (const s of d.sourceIds) {
+    if (predicate.sourceIds.indexOf(s) >= 0) {
+      sharesAny = true
+      break
+    }
+  }
+  if (!sharesAny) {
+    let pTrue = 0
+    for (const [v, p] of predicate.dist) if (v) pTrue += p
+    if (pTrue === 0) return null
+    // Independent: distribution unchanged.
+    return {
+      dist: new Map(d.dist),
+      sourceIds: d.sourceIds.slice(),
+      joint: d.joint.map((e) => ({
+        sourceVals: e.sourceVals.slice(),
+        value: e.value,
+        prob: e.prob,
+      })),
+    }
+  }
+
+  // Compute merged source ordering (d's sources first, then predicate's
+  // unique sources).
+  const mergedSources: string[] = d.sourceIds.slice()
+  const sourceIndex = new Map<string, number>()
+  d.sourceIds.forEach((s, i) => sourceIndex.set(s, i))
+  for (const s of predicate.sourceIds) {
+    if (!sourceIndex.has(s)) {
+      sourceIndex.set(s, mergedSources.length)
+      mergedSources.push(s)
+    }
+  }
+
+  const sharedDIdx: number[] = []
+  const sharedPIdx: number[] = []
+  for (let i = 0; i < d.sourceIds.length; i++) {
+    const j = predicate.sourceIds.indexOf(d.sourceIds[i])
+    if (j >= 0) {
+      sharedDIdx.push(i)
+      sharedPIdx.push(j)
+    }
+  }
+
+  // Index predicate entries by shared source values.
+  const pByShared = new Map<string, JointEntry<boolean>[]>()
+  for (const pe of predicate.joint) {
+    const key = sharedPIdx.map((i) => pe.sourceVals[i]).join('|')
+    const arr = pByShared.get(key)
+    if (arr) arr.push(pe)
+    else pByShared.set(key, [pe])
+  }
+
+  // Marginal mass of shared values in predicate (chain rule denominator).
+  const pSharedMarginal = sharedMarginalCache(predicate, sharedPIdx)
+
+  const newJoint: JointEntry<T>[] = []
+  const newMarginal = new Map<T, number>()
+
+  for (const de of d.joint) {
+    const key = sharedDIdx.map((i) => de.sourceVals[i]).join('|')
+    const candidates = pByShared.get(key) ?? []
+    const pShared = pSharedMarginal.get(key) ?? 0
+    if (pShared === 0) continue
+    for (const pe of candidates) {
+      if (pe.value !== true) continue
+      // Joint prob (d outcome AND predicate outcome) given they agree on
+      // shared sources: de.prob * pe.prob / p(shared).
+      const jointProb = (de.prob * pe.prob) / pShared
+      // sourceVals layout: keep d's positions; predicate-only sources are
+      // appended. We don't need to record predicate-only source values since
+      // we're collapsing to d's value space; preserving d's positions is
+      // sufficient for further conditioning/combinations on d's sources.
+      // But to keep mergedSources consistent we extend with whatever the
+      // predicate contributed (or fill in undefined-as-NaN).
+      let sourceVals: number[]
+      if (mergedSources.length === d.sourceIds.length) {
+        sourceVals = de.sourceVals.slice()
+      } else {
+        sourceVals = new Array(mergedSources.length)
+        for (let i = 0; i < d.sourceIds.length; i++) {
+          sourceVals[i] = de.sourceVals[i]
+        }
+        for (let i = 0; i < predicate.sourceIds.length; i++) {
+          const mIdx = sourceIndex.get(predicate.sourceIds[i])!
+          if (mIdx >= d.sourceIds.length) {
+            sourceVals[mIdx] = pe.sourceVals[i]
+          }
+        }
+      }
+      newJoint.push({ sourceVals, value: de.value, prob: jointProb })
+      newMarginal.set(de.value, (newMarginal.get(de.value) ?? 0) + jointProb)
+      if (newJoint.length > MAX_JOINT_SIZE) return null
+    }
+  }
+
+  if (newJoint.length === 0) return null
+
+  // Renormalize so probabilities sum to 1 (we conditioned on the event).
+  let total = 0
+  for (const e of newJoint) total += e.prob
+  if (total === 0) return null
+  for (const e of newJoint) e.prob /= total
+  for (const k of [...newMarginal.keys()]) {
+    newMarginal.set(k, newMarginal.get(k)! / total)
+  }
+
+  return { dist: newMarginal, sourceIds: mergedSources, joint: newJoint }
+}
+
 // ---------------------------------------------------------------------------
 // Use-count tracking (variables)
 // ---------------------------------------------------------------------------
@@ -834,72 +968,13 @@ function classifyProgram(
 ): Tier {
   const analysis = analyzeProgram(program, parameters)
   if (!analysis.random) return 'constant'
-  if (analysis.exactDist !== null) {
-    // If the program's final expression is a conditional whose branches
-    // produce records with different shapes or different literal `kind`
-    // values, the symbolic exact analysis would produce incorrect joint
-    // results. Force Monte Carlo so the discriminated-union path runs.
-    if (finalExpressionIsMultiShapeIf(program)) return 'monte-carlo'
-    return 'exact'
-  }
+  if (analysis.exactDist !== null) return 'exact'
   return 'monte-carlo'
-}
-
-function finalExpressionIsMultiShapeIf(program: Program): boolean {
-  let last: Expression | null = null
-  for (const stmt of program.statements) {
-    if (stmt.type === 'assignment') last = stmt.value
-    else if (stmt.type === 'expression-statement') last = stmt.expr
-  }
-  if (last === null) return false
-  return expressionProducesMultiShape(last)
-}
-
-function expressionProducesMultiShape(expr: Expression): boolean {
-  if (expr.type !== 'if-expr') return false
-  const thenShapes = recordShapesOf(expr.then)
-  const elseShapes = recordShapesOf(expr.else)
-  if (thenShapes === null || elseShapes === null) return false
-  // Compare key sets and literal `kind` values across all then/else shapes.
-  for (const t of thenShapes) {
-    for (const e of elseShapes) {
-      if (t.keys !== e.keys) return true
-      if (t.kind !== null && e.kind !== null && t.kind !== e.kind) return true
-    }
-  }
-  return false
 }
 
 interface RecordShape {
   keys: string // sorted comma-joined key list
   kind: string | null // literal value of `kind` field, if it's a string literal
-}
-
-// Returns the set of record shapes the expression can produce, or null if
-// the expression doesn't directly produce records. Recurses through nested
-// if-expressions.
-function recordShapesOf(expr: Expression): RecordShape[] | null {
-  if (expr.type === 'record-expr') {
-    const keys = expr.fields
-      .map((f) => f.key)
-      .sort()
-      .join(',')
-    let kind: string | null = null
-    for (const f of expr.fields) {
-      if (f.key === 'kind' && f.value.type === 'string-literal') {
-        kind = f.value.value
-        break
-      }
-    }
-    return [{ keys, kind }]
-  }
-  if (expr.type === 'if-expr') {
-    const t = recordShapesOf(expr.then)
-    const e = recordShapesOf(expr.else)
-    if (t === null && e === null) return null
-    return [...(t ?? []), ...(e ?? [])]
-  }
-  return null
 }
 
 function analyzeProgram(
@@ -1258,20 +1333,42 @@ function analyzeExpr(expr: Expression, env: AnalysisEnv): ExprAnalysis {
           return condSymDist(c as SymDist<boolean>, t, e)
         }
       }
+
+      // Multi-shape discriminated path: when both branches produce records
+      // (possibly nested through further if-exprs) and their shapes differ,
+      // build a discriminated FieldStats by conditioning each variant's
+      // fields on the path that selects it.
+      const discriminatedExact = tryDiscriminatedIfExact(expr, env)
+      const exactDist: (() => FieldStats | null) | null =
+        discriminatedExact !== null
+          ? () => {
+              const stats = discriminatedExact()
+              if (stats !== null) return stats
+              // Discriminated analysis failed (e.g., joint too big or a
+              // field's SymDist couldn't be conditioned). Try the symbolic
+              // marginal as fallback if possible.
+              if (symDist !== null) {
+                const sd = symDist()
+                if (sd === null) return null
+                return symDistToFieldStats(sd)
+              }
+              return null
+            }
+          : symDist !== null
+            ? () => {
+                const sd = symDist!()
+                if (sd === null) return null
+                return symDistToFieldStats(sd)
+              }
+            : null
+
       return {
         random: cond.random || thenA.random || elseA.random,
         randomVarsUsed: unionSets(
           cond.randomVarsUsed,
           unionSets(thenA.randomVarsUsed, elseA.randomVarsUsed),
         ),
-        exactDist:
-          symDist !== null
-            ? () => {
-                const sd = symDist!()
-                if (sd === null) return null
-                return symDistToFieldStats(sd)
-              }
-            : null,
+        exactDist,
         symDist,
       }
     }
@@ -1473,6 +1570,290 @@ function analyzeExpr(expr: Expression, env: AnalysisEnv): ExprAnalysis {
       }
     }
   }
+}
+
+// ---------------------------------------------------------------------------
+// Discriminated if-expr exact analysis
+// ---------------------------------------------------------------------------
+//
+// When an if-expr's branches produce records with different shapes (or the
+// `kind` literal differs), we can still analyze it exactly by treating the
+// result as a discriminated union: each variant has a probability (the
+// probability of its path being taken) and per-field stats CONDITIONED on
+// that path.
+//
+// The path conditions are derived from the chain of `if cond` decisions
+// leading to each leaf record-expr. Fields that share random sources with
+// the path conditions get conditioned via `conditionalizeSymDist`.
+
+interface VariantBranch {
+  recordExpr: RecordExpr
+  // Conditions along the path: each is the analyzed condition of an if-expr
+  // and whether this branch is reached when the cond is true or false.
+  condsAlongPath: Array<{ cond: ExprAnalysis; truth: boolean }>
+}
+
+// Walks a (possibly nested) if-expr chain whose leaves are all record-exprs.
+// Returns the list of variants with their path conditions, or null if any
+// leaf is not a record-expr.
+function extractIfRecordChain(
+  expr: Expression,
+  env: AnalysisEnv,
+): VariantBranch[] | null {
+  if (expr.type === 'record-expr') {
+    return [{ recordExpr: expr, condsAlongPath: [] }]
+  }
+  if (expr.type === 'if-expr') {
+    const condA = analyzeExpr(expr.condition, env)
+    const thenChain = extractIfRecordChain(expr.then, env)
+    const elseChain = extractIfRecordChain(expr.else, env)
+    if (thenChain === null || elseChain === null) return null
+    const out: VariantBranch[] = []
+    for (const v of thenChain) {
+      out.push({
+        recordExpr: v.recordExpr,
+        condsAlongPath: [{ cond: condA, truth: true }, ...v.condsAlongPath],
+      })
+    }
+    for (const v of elseChain) {
+      out.push({
+        recordExpr: v.recordExpr,
+        condsAlongPath: [{ cond: condA, truth: false }, ...v.condsAlongPath],
+      })
+    }
+    return out
+  }
+  return null
+}
+
+// Returns true if the variants' record shapes are non-uniform — i.e., the
+// keys differ across variants, or `kind:` literal values differ across
+// variants. If all variants share the exact same shape (and same `kind`
+// literal), this returns false and the existing if-expr SymDist machinery
+// handles it.
+function variantsAreMultiShape(variants: VariantBranch[]): boolean {
+  if (variants.length < 2) return false
+  const shapes = variants.map((v) => recordShapeOf(v.recordExpr))
+  const firstKeys = shapes[0].keys
+  for (let i = 1; i < shapes.length; i++) {
+    if (shapes[i].keys !== firstKeys) return true
+  }
+  // Same keys; check `kind:` literals.
+  const firstKind = shapes[0].kind
+  for (let i = 1; i < shapes.length; i++) {
+    if (
+      firstKind !== null &&
+      shapes[i].kind !== null &&
+      shapes[i].kind !== firstKind
+    ) {
+      return true
+    }
+  }
+  return false
+}
+
+function recordShapeOf(rec: RecordExpr): RecordShape {
+  const keys = rec.fields
+    .map((f) => f.key)
+    .sort()
+    .join(',')
+  let kind: string | null = null
+  for (const f of rec.fields) {
+    if (f.key === 'kind' && f.value.type === 'string-literal') {
+      kind = f.value.value
+      break
+    }
+  }
+  return { keys, kind }
+}
+
+// Build a SymDist<boolean> for a path: AND together the cond's value
+// (negated when truth=false). Returns null if any cond's SymDist isn't
+// available or isn't boolean, or if the joint exceeds MAX_JOINT_SIZE.
+function buildPathSymDist(
+  conds: Array<{ cond: ExprAnalysis; truth: boolean }>,
+): SymDist<boolean> | null {
+  if (conds.length === 0) return constSymDist<boolean>(true)
+  let result: SymDist<boolean> | null = null
+  for (const { cond, truth } of conds) {
+    if (cond.symDist === null) return null
+    const sd = cond.symDist()
+    if (sd === null) return null
+    for (const v of sd.dist.keys()) {
+      if (typeof v !== 'boolean') return null
+    }
+    let polarized = sd as SymDist<boolean>
+    if (!truth) {
+      polarized = mapSymDist<boolean, boolean>(polarized, (b) => !b)
+    }
+    if (result === null) {
+      result = polarized
+    } else {
+      const combined: SymDist<boolean> | null = combineSymDist<
+        boolean,
+        boolean,
+        boolean
+      >(result, polarized, (a, b) => a && b)
+      if (combined === null) return null
+      result = combined
+    }
+  }
+  return result
+}
+
+// Computes P(path) — marginal probability that a SymDist<boolean> is true.
+function probTrue(sd: SymDist<boolean>): number {
+  let p = 0
+  for (const [v, q] of sd.dist) if (v) p += q
+  return p
+}
+
+// Attempt to build a discriminated FieldStats for an if-expr whose branches
+// produce records with differing shapes. Returns:
+//   - a thunk producing the discriminated FieldStats
+//   - or null if the if-expr structurally isn't a discriminated multi-shape
+//     case (e.g. a non-record branch, or all branches share the same shape).
+//
+// The thunk itself may return null at evaluation time if conditioning fails
+// (joint too big, etc.) — the caller should fall back to MC in that case.
+function tryDiscriminatedIfExact(
+  expr: IfExpr,
+  env: AnalysisEnv,
+): (() => FieldStats | null) | null {
+  const variants = extractIfRecordChain(expr, env)
+  if (variants === null) return null
+  if (!variantsAreMultiShape(variants)) return null
+
+  // Determine discriminator (kind vs shape).
+  const allHaveKind = variants.every(
+    (v) => recordShapeOf(v.recordExpr).kind !== null,
+  )
+  const distinctKinds = new Set(
+    variants.map((v) => recordShapeOf(v.recordExpr).kind),
+  )
+  const discriminator: 'kind' | 'shape' =
+    allHaveKind && distinctKinds.size === variants.length ? 'kind' : 'shape'
+
+  // Pre-analyze each variant's record-expr fields. We do this once
+  // (eagerly) so SymDist source IDs are allocated up front and shared with
+  // the conditions in the path (e.g., `$attack` referenced both in cond
+  // and inside the record).
+  interface PreparedVariant {
+    tag: string
+    keys: string[] // ordered, excluding `kind` when discriminator='kind'
+    fieldAnalyses: Array<{ key: string; analysis: ExprAnalysis }>
+    conds: Array<{ cond: ExprAnalysis; truth: boolean }>
+  }
+  const prepared: PreparedVariant[] = variants.map((v) => {
+    const shape = recordShapeOf(v.recordExpr)
+    const tag =
+      discriminator === 'kind' && shape.kind !== null
+        ? shape.kind
+        : 'shape:' + shape.keys
+    const keys: string[] = []
+    const fieldAnalyses: Array<{ key: string; analysis: ExprAnalysis }> = []
+    for (const f of v.recordExpr.fields) {
+      if (discriminator === 'kind' && f.key === 'kind') continue
+      keys.push(f.key)
+      fieldAnalyses.push({
+        key: f.key,
+        analysis: analyzeExpr(f.value, env),
+      })
+    }
+    return { tag, keys, fieldAnalyses, conds: v.condsAlongPath }
+  })
+
+  return () => {
+    const variantStats: DiscriminatedVariant[] = []
+    for (const v of prepared) {
+      const pathSd = buildPathSymDist(v.conds)
+      if (pathSd === null) return null
+      const probability = probTrue(pathSd)
+      // Skip variants with zero probability — they shouldn't appear in the
+      // output. (Edge case: an unsatisfiable path.)
+      if (probability === 0) continue
+
+      const fields: Record<string, FieldStats> = {}
+      for (const fa of v.fieldAnalyses) {
+        // Get the field's SymDist if available; otherwise use exactDist
+        // (records/arrays/discriminated nested in the field).
+        if (fa.analysis.symDist !== null) {
+          const sd = fa.analysis.symDist()
+          if (sd === null) return null
+          const conditioned = conditionalizeSymDist(sd, pathSd)
+          if (conditioned === null) return null
+          const stats = symDistToFieldStats(conditioned)
+          if (stats === null) return null
+          fields[fa.key] = stats
+        } else if (fa.analysis.exactDist !== null) {
+          // Field doesn't expose a SymDist (e.g., nested record/array). The
+          // exact stats can't be conditioned on the path here — if the
+          // field uses random vars shared with the path, this would be
+          // incorrect. Detect that case and fail.
+          const usesShared = setsIntersect(
+            fa.analysis.randomVarsUsed,
+            collectRandomVarsFromConds(v.conds),
+          )
+          // Also fail if the field's analysis has any direct random source
+          // dependency (e.g., a fresh dice-expr inside a nested record).
+          // We can't statically know whether it shares with the path, but
+          // for safety we only allow non-random fields or fields whose
+          // randomness is fully captured by `randomVarsUsed` and is
+          // disjoint from the path's randomness.
+          if (
+            usesShared ||
+            (fa.analysis.random &&
+              fa.analysis.symDist === null &&
+              hasFreshRandomness(fa.analysis))
+          ) {
+            return null
+          }
+          const stats = fa.analysis.exactDist()
+          if (stats === null) return null
+          fields[fa.key] = stats
+        } else {
+          return null
+        }
+      }
+      variantStats.push({
+        tag: v.tag,
+        probability,
+        keys: v.keys.slice(),
+        fields,
+      })
+    }
+
+    if (variantStats.length === 0) return null
+    if (variantStats.length === 1) {
+      // Degenerate: one path has zero probability; surface as a plain record.
+      return { type: 'record', fields: variantStats[0].fields }
+    }
+
+    return {
+      type: 'discriminated',
+      discriminator,
+      variants: variantStats,
+    }
+  }
+}
+
+// Heuristic: does this analysis have any direct random source dependency
+// not captured by named-variable references? (e.g., an inline dice-expr).
+// True means: even though randomVarsUsed is empty, there's randomness
+// inside that we can't track for conditioning purposes.
+function hasFreshRandomness(a: ExprAnalysis): boolean {
+  return a.random && a.randomVarsUsed.size === 0
+}
+
+// Collect the union of randomVarsUsed across all conds in a path.
+function collectRandomVarsFromConds(
+  conds: Array<{ cond: ExprAnalysis; truth: boolean }>,
+): Set<string> {
+  const out = new Set<string>()
+  for (const { cond } of conds) {
+    for (const v of cond.randomVarsUsed) out.add(v)
+  }
+  return out
 }
 
 function applyBinaryToSymDist(

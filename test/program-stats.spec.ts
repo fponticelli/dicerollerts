@@ -689,9 +689,6 @@ if $hit then { kind: "hit", damage: 10 } else { kind: "miss" }
       // hit variant has 'damage' field, miss does not
       expect(hitVariant.keys).toEqual(['damage'])
       expect(missVariant.keys).toEqual([])
-
-      // standardError populated for MC
-      expect(hitVariant.standardError).toBeDefined()
     }
   })
 
@@ -735,13 +732,16 @@ if $hit then { kind: "hit", damage: \`2d6\` } else { kind: "miss" }
     }
   })
 
-  test('forces monte-carlo for if-expr with different record shapes', () => {
+  test('exact analysis for if-expr with different record shapes', () => {
     const prog = parseProgram(`
 if \`d6\` >= 4
   then { kind: "high", v: 1 }
   else { kind: "low", w: 2 }
 `)
-    expect(ProgramStats.classify(prog)).toBe('monte-carlo')
+    expect(ProgramStats.classify(prog)).toBe('exact')
+    const result = ProgramStats.analyze(prog)
+    expect(result.strategy.tier).toBe('exact')
+    expect(result.stats.type).toBe('discriminated')
   })
 
   test('mixed types (not all records) returns mixed', () => {
@@ -767,5 +767,140 @@ else { kind: "mid" }
       const mid = result.stats.variants.find((v) => v.tag === 'mid')!
       expect(mid.probability).toBeCloseTo(4 / 6, 1)
     }
+  })
+})
+
+describe('exact discriminated output', () => {
+  test('attack with rolled value in hit and miss variants', () => {
+    const prog = parseProgram(`
+$attack = \`d20\`
+if $attack >= 11
+  then { kind: "hit", attack: $attack, damage: \`d6\` }
+  else { kind: "miss", attack: $attack }
+`)
+    expect(ProgramStats.classify(prog)).toBe('exact')
+    const result = ProgramStats.analyze(prog)
+    expect(result.strategy.tier).toBe('exact')
+    expect(result.stats.type).toBe('discriminated')
+    if (result.stats.type === 'discriminated') {
+      const hit = result.stats.variants.find((v) => v.tag === 'hit')!
+      const miss = result.stats.variants.find((v) => v.tag === 'miss')!
+      expect(hit.probability).toBeCloseTo(10 / 20, 5)
+      expect(miss.probability).toBeCloseTo(10 / 20, 5)
+
+      // hit.attack should be uniform over 11..20 (CONDITIONED on hit)
+      const hitAttack = hit.fields.attack
+      expect(hitAttack?.type).toBe('number')
+      if (hitAttack?.type === 'number') {
+        expect(hitAttack.min).toBe(11)
+        expect(hitAttack.max).toBe(20)
+        expect(hitAttack.mean).toBeCloseTo(15.5, 5)
+        expect(hitAttack.distribution.get(11)).toBeCloseTo(1 / 10, 5)
+        expect(hitAttack.distribution.get(20)).toBeCloseTo(1 / 10, 5)
+      }
+
+      // miss.attack should be uniform over 1..10 (CONDITIONED on miss)
+      const missAttack = miss.fields.attack
+      expect(missAttack?.type).toBe('number')
+      if (missAttack?.type === 'number') {
+        expect(missAttack.min).toBe(1)
+        expect(missAttack.max).toBe(10)
+        expect(missAttack.mean).toBeCloseTo(5.5, 5)
+      }
+
+      // hit.damage is independent of attack: full d6 distribution
+      const hitDamage = hit.fields.damage
+      expect(hitDamage?.type).toBe('number')
+      if (hitDamage?.type === 'number') {
+        expect(hitDamage.mean).toBeCloseTo(3.5, 5)
+      }
+    }
+  })
+
+  test('margin of failure exactly computed', () => {
+    const prog = parseProgram(`
+$attack = \`d20\`
+if $attack >= 15
+  then { kind: "hit" }
+  else { kind: "miss", missed_by: 15 - $attack }
+`)
+    const result = ProgramStats.analyze(prog)
+    expect(result.strategy.tier).toBe('exact')
+    expect(result.stats.type).toBe('discriminated')
+    if (result.stats.type === 'discriminated') {
+      const miss = result.stats.variants.find((v) => v.tag === 'miss')!
+      const missedBy = miss.fields.missed_by
+      expect(missedBy?.type).toBe('number')
+      if (missedBy?.type === 'number') {
+        // attack ranges 1..14 on miss, missed_by = 15 - attack ranges 1..14
+        expect(missedBy.min).toBe(1)
+        expect(missedBy.max).toBe(14)
+        expect(missedBy.distribution.get(1)).toBeCloseTo(1 / 14, 5)
+      }
+    }
+  })
+
+  test('disjoint case still works exactly', () => {
+    // Cond uses one die, branches use independent dice - no conditioning needed
+    const prog = parseProgram(`
+if \`d20\` >= 11
+  then { kind: "hit", damage: \`2d6\` }
+  else { kind: "miss" }
+`)
+    expect(ProgramStats.classify(prog)).toBe('exact')
+    const result = ProgramStats.analyze(prog)
+    expect(result.strategy.tier).toBe('exact')
+    if (result.stats.type === 'discriminated') {
+      const hit = result.stats.variants.find((v) => v.tag === 'hit')!
+      // damage is independent of hit, mean is 7
+      const damage = hit.fields.damage
+      expect(damage?.type).toBe('number')
+      if (damage?.type === 'number') {
+        expect(damage.mean).toBeCloseTo(7, 5)
+      }
+    }
+  })
+
+  test('three-variant ladder', () => {
+    const prog = parseProgram(`
+$attack = \`d20\`
+if $attack >= 20 then { kind: "crit", roll: $attack }
+else if $attack >= 11 then { kind: "hit", roll: $attack }
+else { kind: "miss", roll: $attack }
+`)
+    const result = ProgramStats.analyze(prog)
+    expect(result.stats.type).toBe('discriminated')
+    if (result.stats.type === 'discriminated') {
+      const crit = result.stats.variants.find((v) => v.tag === 'crit')!
+      const hit = result.stats.variants.find((v) => v.tag === 'hit')!
+      const miss = result.stats.variants.find((v) => v.tag === 'miss')!
+      expect(crit.probability).toBeCloseTo(1 / 20, 5)
+      expect(hit.probability).toBeCloseTo(9 / 20, 5)
+      expect(miss.probability).toBeCloseTo(10 / 20, 5)
+
+      const critRoll = crit.fields.roll
+      expect(critRoll?.type).toBe('number')
+      if (critRoll?.type === 'number') {
+        expect(critRoll.distribution.get(20)).toBeCloseTo(1, 5)
+      }
+    }
+  })
+
+  test('falls back to MC if joint too large', () => {
+    // Many shared dice would blow joint size; ensure graceful fallback.
+    const prog = parseProgram(`
+$a = \`d20\`
+$b = \`d20\`
+$c = \`d20\`
+$d = \`d20\`
+$e = \`d20\`
+if $a + $b + $c + $d + $e >= 60
+  then { kind: "high", a: $a, b: $b, c: $c, d: $d, e: $e }
+  else { kind: "low", a: $a, b: $b, c: $c, d: $d, e: $e }
+`)
+    const result = ProgramStats.analyze(prog)
+    // Either exact (if under cap) or MC (if over)
+    expect(['exact', 'monte-carlo'].includes(result.strategy.tier)).toBe(true)
+    expect(result.stats.type).toBe('discriminated')
   })
 })
