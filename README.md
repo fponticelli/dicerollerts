@@ -263,7 +263,7 @@ if (!parsed.success) {
 
 - Variables: `$name = expr` (immutable, `$[a-z_][a-z0-9_]*`)
 - Dice in backticks: `` `d20 + $mod` ``, `` `4d6 drop 1` ``, `` `8d10 count >= 6` ``
-- Variables in dice expressions: `$var` works in additive positions (`` `d20 + $mod` ``), count positions (`` `$rollsD6` ``), and sides positions (`` `1d$sides` ``). Parametric forms use uppercase `D` by convention but lowercase also works. Dice count is capped at 10000 per expression at evaluation time.
+- Variables in dice expressions: `$var` works in additive, count, and sides positions (see [Variables in dice expressions](#variables-in-dice-expressions))
 - Arithmetic: `+`, `-`, `*`, `/` (integer division)
 - Comparison: `==`, `!=`, `>`, `<`, `>=`, `<=`
 - Boolean: `and`, `or`, `not`
@@ -277,6 +277,50 @@ if (!parsed.success) {
 - Parameters: `$name is { default: ..., min, max, enum, label, description }`
 - Comments: `# line comment`
 - Statements separated by newlines
+
+### Variables in dice expressions
+
+Inside backticks, `$var` references resolve to the variable's value at roll time. Three positions are supported:
+
+**Additive position** -- modify a roll with a constant or computed value:
+
+```
+$mod = 5
+$attack = `d20 + $mod`
+```
+
+**Count position** (parametric count) -- roll a variable number of dice:
+
+```
+$rolls = 3
+$damage = `$rollsD6`     # rolls 3d6
+```
+
+The variable may itself be a dice expression:
+
+```
+$rolls = `d4`             # rolls a d4 (1-4)
+$damage = `$rollsD6`     # rolls between 1d6 and 4d6, summed
+```
+
+**Sides position** (parametric sides) -- roll a die with variable face count:
+
+```
+$sides = 8
+$roll = `1d$sides`       # rolls a d8
+```
+
+**Both positions:**
+
+```
+$n = 3
+$s = 6
+$roll = `$nD$s`          # rolls 3d6
+```
+
+By convention, uppercase `D` is used for parametric forms, but the parser accepts both. Counts of 0 or fewer return 0; the resolved count is capped at 10000 per expression -- programs that try to roll more (e.g., `\`100000d6\``) throw a clear runtime error.
+
+For variable counts, distribution analysis enumerates over the count's possible values when feasible, falling back to Monte Carlo for large or unbounded distributions.
 
 ### Match expressions
 
