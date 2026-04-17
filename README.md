@@ -362,6 +362,29 @@ const tier = ProgramStats.classify(program)
 - **`string`**: `frequencies`, optional per-bucket `standardErrors`
 - **`array`**: `elements: FieldStats[]`, optional `aggregate` (pooled stats when all elements are numeric)
 - **`record`**: `fields: Record<string, FieldStats>`
+- **`discriminated`**: `discriminator: 'kind' | 'shape'`, `variants: DiscriminatedVariant[]` (see below)
+
+### Discriminated outputs
+
+When a program's output can take on multiple record shapes, use a `kind`
+field to discriminate variants. The analyzer detects this and produces
+per-variant statistics:
+
+```
+$hit = `d20 + 5` >= 15
+if $hit
+  then { kind: "hit", damage: `2d6 + 3` }
+  else { kind: "miss", margin: 0 }
+```
+
+The result is a `discriminated` `FieldStats` with one entry per kind value,
+each containing the probability of that variant and the marginal stats
+for its fields. The `kind` field itself is a constant within each variant
+and is not included in the per-variant stats.
+
+If trials produce records with different keys but no `kind` field,
+the analyzer falls back to grouping by key set (`discriminator: 'shape'`).
+For consistent UI rendering, prefer the `kind` convention.
 
 Helpers for charting:
 

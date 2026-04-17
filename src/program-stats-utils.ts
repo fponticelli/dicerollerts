@@ -1,4 +1,5 @@
 import type {
+  DiscriminatedVariant,
   FieldStats,
   NumberAggregateStats,
   Percentiles,
@@ -148,6 +149,29 @@ export function fieldStatsToJSON(stats: FieldStats): unknown {
       }
       return { type: 'record', fields }
     }
+    case 'discriminated': {
+      const variants = stats.variants.map((v) => {
+        const fields: Record<string, unknown> = {}
+        for (const [k, sub] of Object.entries(v.fields)) {
+          fields[k] = fieldStatsToJSON(sub)
+        }
+        const out: Record<string, unknown> = {
+          tag: v.tag,
+          probability: v.probability,
+          keys: v.keys.slice(),
+          fields,
+        }
+        if (v.standardError !== undefined) {
+          out.standardError = v.standardError
+        }
+        return out
+      })
+      return {
+        type: 'discriminated',
+        discriminator: stats.discriminator,
+        variants,
+      }
+    }
     case 'mixed': {
       return { type: 'mixed' }
     }
@@ -218,6 +242,36 @@ export function fieldStatsFromJSON(json: unknown): FieldStats {
         fields[k] = fieldStatsFromJSON(v)
       }
       return { type: 'record', fields }
+    }
+    case 'discriminated': {
+      const variantsIn = o.variants as unknown[]
+      const discriminator = o.discriminator as 'kind' | 'shape'
+      const variants: DiscriminatedVariant[] = variantsIn.map((raw) => {
+        if (typeof raw !== 'object' || raw === null) {
+          throw new Error('Expected DiscriminatedVariant object')
+        }
+        const vo = raw as Record<string, unknown>
+        const fieldsIn = vo.fields as Record<string, unknown>
+        const fields: Record<string, FieldStats> = {}
+        for (const [k, sub] of Object.entries(fieldsIn)) {
+          fields[k] = fieldStatsFromJSON(sub)
+        }
+        const variant: DiscriminatedVariant = {
+          tag: vo.tag as string,
+          probability: vo.probability as number,
+          keys: (vo.keys as string[]).slice(),
+          fields,
+        }
+        if (vo.standardError !== undefined) {
+          variant.standardError = vo.standardError as number
+        }
+        return variant
+      })
+      return {
+        type: 'discriminated',
+        discriminator,
+        variants,
+      }
     }
     case 'mixed': {
       return { type: 'mixed' }

@@ -74,7 +74,27 @@ export type FieldStats =
       aggregate?: NumberAggregateStats
     }
   | { type: 'record'; fields: Record<string, FieldStats> }
+  | {
+      type: 'discriminated'
+      discriminator: 'kind' | 'shape'
+      variants: DiscriminatedVariant[]
+    }
   | { type: 'mixed' }
+
+export interface DiscriminatedVariant {
+  // The kind value for `discriminator: 'kind'`, or a synthetic `shape:a,b,c`
+  // tag for `discriminator: 'shape'`.
+  tag: string
+  // Share of trials matching this variant.
+  probability: number
+  // Standard error of the probability (Monte Carlo only).
+  standardError?: number
+  // Field names present in this variant (excluding the discriminator field
+  // when `discriminator: 'kind'`).
+  keys: string[]
+  // Marginal stats per field, computed only over this variant's trials.
+  fields: Record<string, FieldStats>
+}
 
 export type Tier = 'constant' | 'exact' | 'monte-carlo'
 
@@ -815,9 +835,71 @@ function classifyProgram(
   const analysis = analyzeProgram(program, parameters)
   if (!analysis.random) return 'constant'
   if (analysis.exactDist !== null) {
+    // If the program's final expression is a conditional whose branches
+    // produce records with different shapes or different literal `kind`
+    // values, the symbolic exact analysis would produce incorrect joint
+    // results. Force Monte Carlo so the discriminated-union path runs.
+    if (finalExpressionIsMultiShapeIf(program)) return 'monte-carlo'
     return 'exact'
   }
   return 'monte-carlo'
+}
+
+function finalExpressionIsMultiShapeIf(program: Program): boolean {
+  let last: Expression | null = null
+  for (const stmt of program.statements) {
+    if (stmt.type === 'assignment') last = stmt.value
+    else if (stmt.type === 'expression-statement') last = stmt.expr
+  }
+  if (last === null) return false
+  return expressionProducesMultiShape(last)
+}
+
+function expressionProducesMultiShape(expr: Expression): boolean {
+  if (expr.type !== 'if-expr') return false
+  const thenShapes = recordShapesOf(expr.then)
+  const elseShapes = recordShapesOf(expr.else)
+  if (thenShapes === null || elseShapes === null) return false
+  // Compare key sets and literal `kind` values across all then/else shapes.
+  for (const t of thenShapes) {
+    for (const e of elseShapes) {
+      if (t.keys !== e.keys) return true
+      if (t.kind !== null && e.kind !== null && t.kind !== e.kind) return true
+    }
+  }
+  return false
+}
+
+interface RecordShape {
+  keys: string // sorted comma-joined key list
+  kind: string | null // literal value of `kind` field, if it's a string literal
+}
+
+// Returns the set of record shapes the expression can produce, or null if
+// the expression doesn't directly produce records. Recurses through nested
+// if-expressions.
+function recordShapesOf(expr: Expression): RecordShape[] | null {
+  if (expr.type === 'record-expr') {
+    const keys = expr.fields
+      .map((f) => f.key)
+      .sort()
+      .join(',')
+    let kind: string | null = null
+    for (const f of expr.fields) {
+      if (f.key === 'kind' && f.value.type === 'string-literal') {
+        kind = f.value.value
+        break
+      }
+    }
+    return [{ keys, kind }]
+  }
+  if (expr.type === 'if-expr') {
+    const t = recordShapesOf(expr.then)
+    const e = recordShapesOf(expr.else)
+    if (t === null && e === null) return null
+    return [...(t ?? []), ...(e ?? [])]
+  }
+  return null
 }
 
 function analyzeProgram(
@@ -1899,6 +1981,28 @@ function cloneFieldStats(stats: FieldStats): FieldStats {
       }
       return { type: 'record', fields }
     }
+    case 'discriminated': {
+      const variants = stats.variants.map((v) => {
+        const fields: Record<string, FieldStats> = {}
+        for (const [k, sub] of Object.entries(v.fields)) {
+          fields[k] = cloneFieldStats(sub)
+        }
+        return {
+          tag: v.tag,
+          probability: v.probability,
+          ...(v.standardError !== undefined
+            ? { standardError: v.standardError }
+            : {}),
+          keys: v.keys.slice(),
+          fields,
+        }
+      })
+      return {
+        type: 'discriminated',
+        discriminator: stats.discriminator,
+        variants,
+      }
+    }
     case 'mixed':
       return { type: 'mixed' }
   }
@@ -2134,6 +2238,53 @@ function checkConvergence(values: Value[], config: ConvergenceConfig): boolean {
     case 'record': {
       const recs = values as Record<string, Value>[]
       if (recs.length === 0) return true
+      const discriminator = detectDiscriminator(recs)
+      if (discriminator !== 'none') {
+        // Group records by tag and check convergence within each group, plus
+        // convergence of the variant frequencies themselves.
+        const groups = new Map<string, Record<string, Value>[]>()
+        for (const rec of recs) {
+          const tag =
+            discriminator === 'kind'
+              ? (rec['kind'] as string)
+              : 'shape:' + shapeKey(rec)
+          let group = groups.get(tag)
+          if (!group) {
+            group = []
+            groups.set(tag, group)
+          }
+          group.push(rec)
+        }
+        const n = recs.length
+        // Variant-frequency convergence (treat each variant probability as a
+        // boolean trial).
+        for (const group of groups.values()) {
+          const p = group.length / n
+          const stderr = Math.sqrt((p * (1 - p)) / n)
+          if (stderr > config.targetBinStderr) return false
+        }
+        // Per-variant per-field convergence (skip the `kind` field for kind).
+        for (const group of groups.values()) {
+          const keySet = new Set<string>()
+          for (const rec of group) {
+            for (const k of Object.keys(rec)) {
+              if (discriminator === 'kind' && k === 'kind') continue
+              keySet.add(k)
+            }
+          }
+          for (const k of keySet) {
+            const column: Value[] = []
+            for (const rec of group) {
+              if (Object.prototype.hasOwnProperty.call(rec, k)) {
+                column.push(rec[k])
+              }
+            }
+            if (column.length === 0) continue
+            if (!checkConvergence(column, config)) return false
+          }
+        }
+        return true
+      }
       const keys = Object.keys(recs[0])
       for (const k of keys) {
         const column = recs.map((r) => r[k])
@@ -2345,6 +2496,13 @@ function buildRecordStats(
   trialCount: number,
 ): FieldStats {
   if (values.length === 0) return { type: 'record', fields: {} }
+
+  // Detect discrimination strategy.
+  const discriminator = detectDiscriminator(values)
+  if (discriminator !== 'none') {
+    return buildDiscriminatedStats(values, trialCount, discriminator)
+  }
+
   const keys = Object.keys(values[0])
   const fields: Record<string, FieldStats> = {}
   for (const key of keys) {
@@ -2352,4 +2510,138 @@ function buildRecordStats(
     fields[key] = buildStats(column, trialCount)
   }
   return { type: 'record', fields }
+}
+
+/**
+ * Determine the discrimination strategy for an array of records:
+ * - `kind`: every record has a string `kind` field, with at least two
+ *   distinct values across the records.
+ * - `shape`: records have varying key sets (and not all have a string `kind`).
+ * - `none`: all records share the same key set (and either no `kind` field or
+ *   all `kind` values agree).
+ */
+function detectDiscriminator(
+  values: Record<string, Value>[],
+): 'kind' | 'shape' | 'none' {
+  if (values.length === 0) return 'none'
+
+  // Check for `kind` discrimination: every record has a string `kind`.
+  let allHaveStringKind = true
+  for (const rec of values) {
+    const k = rec['kind']
+    if (typeof k !== 'string') {
+      allHaveStringKind = false
+      break
+    }
+  }
+  if (allHaveStringKind) {
+    const kinds = new Set<string>()
+    for (const rec of values) {
+      kinds.add(rec['kind'] as string)
+    }
+    if (kinds.size > 1) return 'kind'
+    // Single kind value across all records: not a discriminated union.
+    // Fall through to shape check (shapes likely identical too, returning
+    // `none`).
+  }
+
+  // Check for shape discrimination: records have varying key sets.
+  const firstKey = shapeKey(values[0])
+  for (let i = 1; i < values.length; i++) {
+    if (shapeKey(values[i]) !== firstKey) return 'shape'
+  }
+  return 'none'
+}
+
+function shapeKey(rec: Record<string, Value>): string {
+  return Object.keys(rec).sort().join(',')
+}
+
+function buildDiscriminatedStats(
+  values: Record<string, Value>[],
+  trialCount: number,
+  discriminator: 'kind' | 'shape',
+): FieldStats {
+  // Group trials by tag (preserve first-seen order for stable output).
+  const groupOrder: string[] = []
+  const groups = new Map<string, Record<string, Value>[]>()
+  for (const rec of values) {
+    const tag =
+      discriminator === 'kind'
+        ? (rec['kind'] as string)
+        : 'shape:' + shapeKey(rec)
+    let group = groups.get(tag)
+    if (!group) {
+      group = []
+      groups.set(tag, group)
+      groupOrder.push(tag)
+    }
+    group.push(rec)
+  }
+
+  // Single variant: not actually discriminated — fall back to normal record
+  // stats.
+  if (groupOrder.length <= 1) {
+    const keys = Object.keys(values[0])
+    const fields: Record<string, FieldStats> = {}
+    for (const key of keys) {
+      const column = values.map((rec) => rec[key])
+      fields[key] = buildStats(column, trialCount)
+    }
+    return { type: 'record', fields }
+  }
+
+  const total = values.length
+  const variants: DiscriminatedVariant[] = []
+  for (const tag of groupOrder) {
+    const group = groups.get(tag)!
+    const probability = group.length / total
+    const standardError =
+      trialCount > 0
+        ? Math.sqrt((probability * (1 - probability)) / trialCount)
+        : 0
+
+    // Collect all keys present in this group's records, excluding the
+    // `kind` field when discriminating by kind. Preserve first-seen order.
+    const keySeen = new Set<string>()
+    const keys: string[] = []
+    for (const rec of group) {
+      for (const k of Object.keys(rec)) {
+        if (discriminator === 'kind' && k === 'kind') continue
+        if (!keySeen.has(k)) {
+          keySeen.add(k)
+          keys.push(k)
+        }
+      }
+    }
+
+    const fields: Record<string, FieldStats> = {}
+    for (const key of keys) {
+      // Only include records that actually contain this key (for shape
+      // discrimination, all records in the group share the same shape, so
+      // this is a no-op; for kind discrimination, records may have
+      // optional fields).
+      const column: Value[] = []
+      for (const rec of group) {
+        if (Object.prototype.hasOwnProperty.call(rec, key)) {
+          column.push(rec[key])
+        }
+      }
+      fields[key] = buildStats(column, group.length)
+    }
+
+    variants.push({
+      tag,
+      probability,
+      standardError,
+      keys,
+      fields,
+    })
+  }
+
+  return {
+    type: 'discriminated',
+    discriminator,
+    variants,
+  }
 }

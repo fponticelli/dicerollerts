@@ -188,6 +188,7 @@ export {
   suggestBucketSize,
   binDistribution,
   type FieldStats,
+  type DiscriminatedVariant,
   type Percentiles,
   type NumberAggregateStats,
   type Tier,

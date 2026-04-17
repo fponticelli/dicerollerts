@@ -667,3 +667,105 @@ describe('program-stats - parameters', () => {
     }
   })
 })
+
+describe('discriminated union output', () => {
+  test('detects kind-based discrimination', () => {
+    const prog = parseProgram(`
+$hit = \`d20\` >= 11
+if $hit then { kind: "hit", damage: 10 } else { kind: "miss" }
+`)
+    const result = ProgramStats.analyze(prog, { maxTrials: 5000 })
+    expect(result.stats.type).toBe('discriminated')
+    if (result.stats.type === 'discriminated') {
+      expect(result.stats.discriminator).toBe('kind')
+      const tags = result.stats.variants.map((v) => v.tag).sort()
+      expect(tags).toEqual(['hit', 'miss'])
+
+      const hitVariant = result.stats.variants.find((v) => v.tag === 'hit')!
+      const missVariant = result.stats.variants.find((v) => v.tag === 'miss')!
+      expect(hitVariant.probability).toBeCloseTo(0.5, 1)
+      expect(missVariant.probability).toBeCloseTo(0.5, 1)
+
+      // hit variant has 'damage' field, miss does not
+      expect(hitVariant.keys).toEqual(['damage'])
+      expect(missVariant.keys).toEqual([])
+
+      // standardError populated for MC
+      expect(hitVariant.standardError).toBeDefined()
+    }
+  })
+
+  test('falls back to shape discrimination when no kind', () => {
+    const prog = parseProgram(`
+$hit = \`d20\` >= 11
+if $hit then { damage: 10 } else { margin: 5 }
+`)
+    const result = ProgramStats.analyze(prog, { maxTrials: 5000 })
+    expect(result.stats.type).toBe('discriminated')
+    if (result.stats.type === 'discriminated') {
+      expect(result.stats.discriminator).toBe('shape')
+      expect(result.stats.variants).toHaveLength(2)
+    }
+  })
+
+  test('no discrimination when all records have same shape', () => {
+    const prog = parseProgram(`
+$x = \`d6\`
+{ kind: "always", value: $x }
+`)
+    const result = ProgramStats.analyze(prog, { maxTrials: 1000 })
+    // Single kind = no discrimination, just normal record stats
+    expect(result.stats.type).toBe('record')
+  })
+
+  test('per-variant stats are conditional', () => {
+    const prog = parseProgram(`
+$hit = \`d20\` >= 11
+if $hit then { kind: "hit", damage: \`2d6\` } else { kind: "miss" }
+`)
+    const result = ProgramStats.analyze(prog, { maxTrials: 10000 })
+    if (result.stats.type === 'discriminated') {
+      const hit = result.stats.variants.find((v) => v.tag === 'hit')!
+      const damage = hit.fields.damage
+      if (damage?.type === 'number') {
+        // 2d6 mean is 7 - this should be approximately right since we only
+        // see damage on hit
+        expect(damage.mean).toBeCloseTo(7, 0)
+      }
+    }
+  })
+
+  test('forces monte-carlo for if-expr with different record shapes', () => {
+    const prog = parseProgram(`
+if \`d6\` >= 4
+  then { kind: "high", v: 1 }
+  else { kind: "low", w: 2 }
+`)
+    expect(ProgramStats.classify(prog)).toBe('monte-carlo')
+  })
+
+  test('mixed types (not all records) returns mixed', () => {
+    const prog = parseProgram(`
+if \`d6\` >= 4 then 5 else "no"
+`)
+    const result = ProgramStats.analyze(prog, { maxTrials: 1000 })
+    // For mixed numeric+string, current behavior is 'mixed'
+    expect(result.stats.type).toBe('mixed')
+  })
+
+  test('kind discrimination works with three variants', () => {
+    const prog = parseProgram(`
+$x = \`d6\`
+if $x == 1 then { kind: "low" }
+else if $x == 6 then { kind: "high" }
+else { kind: "mid" }
+`)
+    const result = ProgramStats.analyze(prog, { maxTrials: 5000 })
+    if (result.stats.type === 'discriminated') {
+      const tags = result.stats.variants.map((v) => v.tag).sort()
+      expect(tags).toEqual(['high', 'low', 'mid'])
+      const mid = result.stats.variants.find((v) => v.tag === 'mid')!
+      expect(mid.probability).toBeCloseTo(4 / 6, 1)
+    }
+  })
+})
