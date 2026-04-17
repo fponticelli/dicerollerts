@@ -705,6 +705,9 @@ class Parser {
     while (this.pos < this.input.length && this.input[this.pos] === ',') {
       this.pos++
       this.skipWhitespaceAndComments()
+      if (this.pos < this.input.length && this.input[this.pos] === ']') {
+        break
+      }
       elements.push(this.parseExpression())
       this.skipWhitespaceAndComments()
     }
@@ -725,6 +728,9 @@ class Parser {
     while (this.pos < this.input.length && this.input[this.pos] === ',') {
       this.pos++
       this.skipWhitespaceAndComments()
+      if (this.pos < this.input.length && this.input[this.pos] === '}') {
+        break
+      }
       fields.push(this.parseRecordField())
       this.skipWhitespaceAndComments()
     }

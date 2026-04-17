@@ -218,6 +218,25 @@ describe('program parser - arrays', () => {
         expect(stmt.expr.type).toBe('index-access')
     }
   })
+
+  test('array trailing comma allowed', () => {
+    const result = ProgramParser.parse('[1, 2, 3,]')
+    expect(result.success).toBe(true)
+    if (result.success) {
+      const stmt = result.program.statements[0]
+      if (
+        stmt.type === 'expression-statement' &&
+        stmt.expr.type === 'array-expr'
+      ) {
+        expect(stmt.expr.elements).toHaveLength(3)
+      }
+    }
+  })
+
+  test('array with whitespace and trailing comma', () => {
+    const result = ProgramParser.parse('[1, 2, 3, ]')
+    expect(result.success).toBe(true)
+  })
 })
 
 describe('program parser - records', () => {
@@ -232,6 +251,20 @@ describe('program parser - records', () => {
       ) {
         expect(stmt.expr.fields).toHaveLength(2)
         expect(stmt.expr.fields[0].key).toBe('name')
+      }
+    }
+  })
+
+  test('record trailing comma allowed', () => {
+    const result = ProgramParser.parse('{ a: 1, b: 2, }')
+    expect(result.success).toBe(true)
+    if (result.success) {
+      const stmt = result.program.statements[0]
+      if (
+        stmt.type === 'expression-statement' &&
+        stmt.expr.type === 'record-expr'
+      ) {
+        expect(stmt.expr.fields).toHaveLength(2)
       }
     }
   })
