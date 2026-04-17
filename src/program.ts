@@ -70,6 +70,7 @@ export type Expression =
   | RepeatExpr
   | FieldAccess
   | IndexAccess
+  | MatchExpr
 
 export interface NumberLiteral {
   type: 'number-literal'
@@ -225,6 +226,43 @@ export function indexAccess(
   index: Expression,
 ): IndexAccess {
   return { type: 'index-access', object, index }
+}
+
+export interface MatchExpr {
+  type: 'match-expr'
+  value?: Expression
+  arms: MatchArm[]
+}
+
+export interface MatchArm {
+  pattern: MatchPattern
+  guard?: Expression
+  body: Expression
+}
+
+export type MatchPattern =
+  | { kind: 'wildcard' }
+  | { kind: 'expression'; expr: Expression }
+
+export function matchExpr(
+  value: Expression | undefined,
+  arms: MatchArm[],
+): MatchExpr {
+  return { type: 'match-expr', value, arms }
+}
+
+export function matchArm(
+  pattern: MatchPattern,
+  body: Expression,
+  guard?: Expression,
+): MatchArm {
+  return { pattern, body, guard }
+}
+
+export const wildcardPattern: MatchPattern = { kind: 'wildcard' }
+
+export function expressionPattern(expr: Expression): MatchPattern {
+  return { kind: 'expression', expr }
 }
 
 export type Value =
