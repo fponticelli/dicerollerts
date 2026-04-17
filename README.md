@@ -272,8 +272,63 @@ if (!parsed.success) {
 - Field access: `$rec.field`
 - Arrays: `[1, 2, 3]`, indexing: `$arr[0]`
 - `repeat N { body }` (returns array)
+- Parameters: `$name is { default: ..., min, max, enum, label, description }`
 - Comments: `# line comment`
 - Statements separated by newlines
+
+### Parameters
+
+Declare a variable as a parameter with `is { ... }` to give it a default value plus optional metadata. Tools can introspect the program to render UI inputs; callers can override defaults at runtime.
+
+```
+$str_mod is {
+  default: 5,
+  min: 0,
+  max: 30,
+  label: "STR Modifier",
+  description: "Your strength bonus",
+}
+
+$weapon is {
+  default: "longsword",
+  enum: ["longsword", "dagger", "greataxe"],
+}
+
+$advantage is { default: false }
+
+$attack_die is { default: `d20` }
+
+$attack = $attack_die + $str_mod
+$hit = $attack >= 15
+{ attack: $attack, hit: $hit }
+```
+
+Field rules:
+
+- `default` (required): a literal value or backtick dice expression
+- `label`, `description`: string literals
+- `min`, `max`: only valid when `default` is a number
+- `enum`: only valid when `default` is non-number; entries must match default's type; default must be in enum
+
+Override at runtime:
+
+```ts
+evaluator.run(program, { parameters: { str_mod: 7, weapon: 'dagger' } })
+ProgramStats.analyze(program, { parameters: { str_mod: 7 } })
+```
+
+Overrides are validated (unknown name, type mismatch, out of range, not in enum) and throw clear errors. Without overrides, literal defaults act as constants and dice-expression defaults are rolled per execution (or analyzed exactly).
+
+Introspect parameters for UI:
+
+```ts
+import { ProgramParameters } from 'dicerollerts'
+
+const params = ProgramParameters.list(program)
+// [{ name, default, defaultExpr?, defaultSource?, label?, description?, min?, max?, enum? }, ...]
+```
+
+The input kind is inferred by the consumer from the data: number with `min` and `max` → bounded slider, string with `enum` → dropdown, boolean → toggle, dice expression default → free-form expression input, etc.
 
 ### Probability analysis
 
