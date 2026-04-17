@@ -1426,3 +1426,173 @@ if $roll >= 11
     ).toBe(true)
   })
 })
+
+describe('match expression analysis', () => {
+  test('constant guard match is constant', () => {
+    const prog = parseProgram('match { true -> 1, _ -> 2 }')
+    expect(ProgramStats.classify(prog)).toBe('constant')
+    const result = ProgramStats.analyze(prog)
+    expect(result.stats.type).toBe('number')
+    if (result.stats.type === 'number') {
+      expect(result.stats.mean).toBe(1)
+    }
+  })
+
+  test('constant value match is constant', () => {
+    const prog = parseProgram('match 2 { 1 -> "a", 2 -> "b", _ -> "c" }')
+    expect(ProgramStats.classify(prog)).toBe('constant')
+    const result = ProgramStats.analyze(prog)
+    expect(result.stats.type).toBe('string')
+    if (result.stats.type === 'string') {
+      expect(result.stats.frequencies.get('b')).toBe(1)
+    }
+  })
+
+  test('match on dice produces a string distribution', () => {
+    // Verify match desugars correctly and produces the same distribution as
+    // the equivalent if-else chain (which is the analyzer's reference).
+    const matchProg = parseProgram(`
+match \`d6\` {
+  1 -> "one"
+  2 -> "two"
+  _ -> "other"
+}
+`)
+    const ifProg = parseProgram(`
+$x = \`d6\`
+if $x == 1 then "one" else if $x == 2 then "two" else "other"
+`)
+    const matchResult = ProgramStats.analyze(matchProg)
+    const ifResult = ProgramStats.analyze(ifProg)
+    expect(matchResult.stats.type).toBe('string')
+    if (
+      matchResult.stats.type === 'string' &&
+      ifResult.stats.type === 'string'
+    ) {
+      expect(matchResult.stats.frequencies.get('one')).toBeCloseTo(
+        ifResult.stats.frequencies.get('one') ?? 0,
+        4,
+      )
+      expect(matchResult.stats.frequencies.get('two')).toBeCloseTo(
+        ifResult.stats.frequencies.get('two') ?? 0,
+        4,
+      )
+      expect(matchResult.stats.frequencies.get('other')).toBeCloseTo(
+        ifResult.stats.frequencies.get('other') ?? 0,
+        4,
+      )
+    }
+  })
+
+  test('match guard mode matches equivalent if chain', () => {
+    const matchProg = parseProgram(`
+$x = \`d6\`
+match {
+  $x >= 5 -> "high"
+  $x >= 3 -> "mid"
+  _ -> "low"
+}
+`)
+    const ifProg = parseProgram(`
+$x = \`d6\`
+if $x >= 5 then "high" else if $x >= 3 then "mid" else "low"
+`)
+    const matchResult = ProgramStats.analyze(matchProg)
+    const ifResult = ProgramStats.analyze(ifProg)
+    expect(matchResult.stats.type).toBe('string')
+    if (
+      matchResult.stats.type === 'string' &&
+      ifResult.stats.type === 'string'
+    ) {
+      for (const k of ['high', 'mid', 'low']) {
+        expect(matchResult.stats.frequencies.get(k)).toBeCloseTo(
+          ifResult.stats.frequencies.get(k) ?? 0,
+          4,
+        )
+      }
+    }
+  })
+
+  test('match with discriminated record output', () => {
+    const prog = parseProgram(`
+$attack = \`d20\`
+match {
+  $attack >= 11 -> { kind: "hit", attack: $attack }
+  _ -> { kind: "miss", attack: $attack }
+}
+`)
+    const result = ProgramStats.analyze(prog)
+    expect(result.stats.type).toBe('discriminated')
+  })
+
+  test('non-exhaustive match falls back to MC', () => {
+    // No '_' arm — so analysis cannot prove exhaustiveness.
+    const prog = parseProgram(`
+$roll = \`d6\`
+match $roll {
+  1 -> "one"
+  2 -> "two"
+  3 -> "three"
+  4 -> "four"
+  5 -> "five"
+  6 -> "six"
+}
+`)
+    // Either MC succeeds for all trials (each d6 outcome has a matching arm)
+    // or analysis cannot determine exhaustiveness statically. The classifier
+    // returns 'monte-carlo' because no exhaustive default exists.
+    expect(ProgramStats.classify(prog)).toBe('monte-carlo')
+  })
+
+  test('value-mode match on dice produces all expected variants', () => {
+    const prog = parseProgram(`
+match \`d4\` {
+  1 -> "a"
+  2 -> "b"
+  3 -> "c"
+  _ -> "other"
+}
+`)
+    const result = ProgramStats.analyze(prog)
+    expect(result.stats.type).toBe('string')
+    if (result.stats.type === 'string') {
+      expect(result.stats.frequencies.has('a')).toBe(true)
+      expect(result.stats.frequencies.has('b')).toBe(true)
+      expect(result.stats.frequencies.has('c')).toBe(true)
+      expect(result.stats.frequencies.has('other')).toBe(true)
+      let sum = 0
+      for (const v of result.stats.frequencies.values()) sum += v
+      expect(sum).toBeCloseTo(1, 4)
+    }
+  })
+
+  test('value-mode match matches equivalent if chain', () => {
+    // Both forms should yield the same exact frequencies through the
+    // analyzer (same desugaring path through if-expr machinery).
+    const matchProg = parseProgram(`
+match \`d4\` {
+  1 -> "a"
+  2 -> "b"
+  _ -> "other"
+}
+`)
+    const ifProg = parseProgram(`
+$v = \`d4\`
+if $v == 1 then "a" else if $v == 2 then "b" else "other"
+`)
+    const matchResult = ProgramStats.analyze(matchProg)
+    const ifResult = ProgramStats.analyze(ifProg)
+    expect(matchResult.stats.type).toBe('string')
+    if (
+      matchResult.stats.type === 'string' &&
+      ifResult.stats.type === 'string'
+    ) {
+      for (const k of ['a', 'b', 'other']) {
+        expect(matchResult.stats.frequencies.get(k)).toBeCloseTo(
+          ifResult.stats.frequencies.get(k) ?? 0,
+          4,
+        )
+      }
+    }
+  })
+})

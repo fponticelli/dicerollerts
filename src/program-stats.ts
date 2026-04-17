@@ -3,12 +3,15 @@ import type {
   Program,
   Statement,
   Expression,
+  MatchArm,
+  MatchExpr,
   Value,
   BinaryOper,
   ParameterSpec,
   RecordExpr,
   IfExpr,
 } from './program'
+import { ifExpr, binaryExpr, booleanLiteral } from './program'
 import { Evaluator } from './evaluator'
 import { DiceStats } from './dice-stats'
 
@@ -856,6 +859,14 @@ function countVariableUses(program: Program): Map<string, number> {
         visitExpr(expr.object)
         visitExpr(expr.index)
         return
+      case 'match-expr':
+        if (expr.value !== undefined) visitExpr(expr.value)
+        for (const arm of expr.arms) {
+          if (arm.pattern.kind === 'expression') visitExpr(arm.pattern.expr)
+          if (arm.guard !== undefined) visitExpr(arm.guard)
+          visitExpr(arm.body)
+        }
+        return
     }
   }
 
@@ -1137,6 +1148,59 @@ function symDistAnalysis(
     exactDist,
     symDist: thunk,
   }
+}
+
+// ---------------------------------------------------------------------------
+// Match expression desugaring
+// ---------------------------------------------------------------------------
+//
+// A `match` expression with a final unconditional `_` arm desugars into a
+// nested if-then-else chain, letting the existing if-expr machinery handle
+// classification, exact analysis, and discriminated output detection.
+//
+// If the match has no exhaustive default (`_` without guard at the end),
+// `desugarMatch` returns null and analysis falls back to Monte Carlo.
+
+function desugarMatch(expr: MatchExpr): Expression | null {
+  if (expr.arms.length === 0) return null
+
+  const lastArm = expr.arms[expr.arms.length - 1]
+  const hasUnconditionalDefault =
+    lastArm.pattern.kind === 'wildcard' && lastArm.guard === undefined
+
+  if (!hasUnconditionalDefault) return null
+
+  let elseBranch: Expression = lastArm.body
+
+  for (let i = expr.arms.length - 2; i >= 0; i--) {
+    const arm = expr.arms[i]
+    const condition = buildArmCondition(arm, expr.value)
+    elseBranch = ifExpr(condition, arm.body, elseBranch)
+  }
+
+  return elseBranch
+}
+
+function buildArmCondition(
+  arm: MatchArm,
+  matchValue: Expression | undefined,
+): Expression {
+  let cond: Expression
+  if (arm.pattern.kind === 'wildcard') {
+    cond = booleanLiteral(true)
+  } else if (matchValue === undefined) {
+    // Guard mode: pattern is itself a boolean
+    cond = arm.pattern.expr
+  } else {
+    // Value mode: matchValue == pattern
+    cond = binaryExpr('eq', matchValue, arm.pattern.expr)
+  }
+
+  if (arm.guard !== undefined) {
+    cond = binaryExpr('and', cond, arm.guard)
+  }
+
+  return cond
 }
 
 function analyzeExpr(expr: Expression, env: AnalysisEnv): ExprAnalysis {
@@ -1568,6 +1632,77 @@ function analyzeExpr(expr: Expression, env: AnalysisEnv): ExprAnalysis {
         exactDist: null,
         symDist: null,
       }
+    }
+
+    case 'match-expr': {
+      // If the matched value is a non-trivial expression, bind it to a
+      // synthetic variable so the desugared if-chain shares a single
+      // source of randomness for the matched value across arms.
+      let desugaredExpr = expr
+      let workingEnv = env
+      if (
+        expr.value !== undefined &&
+        expr.value.type !== 'variable-ref' &&
+        expr.value.type !== 'number-literal' &&
+        expr.value.type !== 'boolean-literal' &&
+        expr.value.type !== 'string-literal'
+      ) {
+        const syntheticName = `__match_value_${env.nextSourceId.value}__`
+        const valueAnalysis = analyzeExpr(expr.value, env)
+        workingEnv = {
+          bindings: new Map(env.bindings),
+          symBindings: new Map(env.symBindings),
+          useCounts: new Map(env.useCounts),
+          nextSourceId: env.nextSourceId,
+        }
+        workingEnv.bindings.set(syntheticName, valueAnalysis)
+        workingEnv.symBindings.set(
+          syntheticName,
+          valueAnalysis.symDist !== null ? valueAnalysis.symDist() : null,
+        )
+        // Give the synthetic variable a high use count so repeated refs
+        // share a single SymDist (no re-rolling).
+        workingEnv.useCounts.set(syntheticName, expr.arms.length + 1)
+        desugaredExpr = {
+          ...expr,
+          value: { type: 'variable-ref', name: syntheticName },
+        }
+      }
+
+      const desugared = desugarMatch(desugaredExpr)
+      if (desugared === null) {
+        // No exhaustive default - fall back to MC by reporting random with
+        // no exact distribution. Walk the arms to gather randomness signals.
+        let random = false
+        let randomVarsUsed = new Set<string>()
+        if (expr.value !== undefined) {
+          const v = analyzeExpr(expr.value, env)
+          random = random || v.random
+          randomVarsUsed = unionSets(randomVarsUsed, v.randomVarsUsed)
+        }
+        for (const arm of expr.arms) {
+          if (arm.pattern.kind === 'expression') {
+            const p = analyzeExpr(arm.pattern.expr, env)
+            random = random || p.random
+            randomVarsUsed = unionSets(randomVarsUsed, p.randomVarsUsed)
+          }
+          if (arm.guard !== undefined) {
+            const g = analyzeExpr(arm.guard, env)
+            random = random || g.random
+            randomVarsUsed = unionSets(randomVarsUsed, g.randomVarsUsed)
+          }
+          const b = analyzeExpr(arm.body, env)
+          random = random || b.random
+          randomVarsUsed = unionSets(randomVarsUsed, b.randomVarsUsed)
+        }
+        return {
+          random,
+          randomVarsUsed,
+          exactDist: null,
+          symDist: null,
+        }
+      }
+      return analyzeExpr(desugared, workingEnv)
     }
   }
 }
