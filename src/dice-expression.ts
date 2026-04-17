@@ -141,7 +141,9 @@ export type SimpleReducer = 'sum' | 'min' | 'max' | 'average' | 'median'
 
 export interface CountReducer {
   type: 'count'
-  threshold: Range
+  // One or more thresholds. Each die contributes 1 success per matching
+  // threshold. A single-threshold `count` behaves exactly as before.
+  thresholds: Range[]
 }
 
 export type DiceReducer = SimpleReducer | CountReducer

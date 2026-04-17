@@ -301,7 +301,8 @@ export const DE = {
 
   expressionExtractorToString(reducer: DiceReducer): string {
     if (typeof reducer === 'object' && reducer.type === 'count') {
-      return ` count ${DE.countThresholdToString(reducer.threshold)}`
+      const parts = reducer.thresholds.map(DE.countThresholdToString)
+      return ` count ${parts.join(' and ')}`
     }
     switch (reducer) {
       case 'sum':

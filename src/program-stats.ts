@@ -14,6 +14,13 @@ import type {
 import { ifExpr, binaryExpr, booleanLiteral } from './program'
 import { Evaluator } from './evaluator'
 import { DiceStats } from './dice-stats'
+import {
+  probabilityGreaterThan,
+  probabilityLessThan,
+  probabilityEqual,
+  totalVariationDistance,
+  klDivergence,
+} from './program-stats-utils'
 
 // Minimal ambient type for AbortSignal (not in ESNext lib without DOM).
 type AbortSignal = { readonly aborted: boolean }
@@ -122,6 +129,30 @@ export interface AnalyzeResult {
   diagnostics: AnalyzeDiagnostics
 }
 
+export interface NumericComparison {
+  probabilityAGreaterThanB: number
+  probabilityAEqualsB: number
+  probabilityALessThanB: number
+  totalVariationDistance: number
+  /** D(a || b); may be Infinity when supports don't overlap. */
+  klDivergenceAFromB: number
+  /** D(b || a); may be Infinity when supports don't overlap. */
+  klDivergenceBFromA: number
+  /** mean(a) - mean(b). */
+  meanDiff: number
+  /** stddev(a) - stddev(b). */
+  stddevDiff: number
+}
+
+export interface CompareResult {
+  a: AnalyzeResult
+  b: AnalyzeResult
+  /**
+   * Populated when both programs produce a numeric output. Absent otherwise.
+   */
+  numeric?: NumericComparison
+}
+
 export interface AnalyzeOptions {
   // Legacy fixed-trial option (still respected as a maxTrials cap when given)
   trials?: number
@@ -222,6 +253,45 @@ export const ProgramStats = {
         fellBackToMC: false,
       },
     }
+  },
+
+  compare(a: Program, b: Program, options?: AnalyzeOptions): CompareResult {
+    const aResult = ProgramStats.analyze(a, options)
+    const bResult = ProgramStats.analyze(b, options)
+    if (aResult.stats.type === 'number' && bResult.stats.type === 'number') {
+      const aStats = aResult.stats
+      const bStats = bResult.stats
+      const numeric: NumericComparison = {
+        probabilityAGreaterThanB: probabilityGreaterThan(
+          aStats.distribution,
+          bStats.distribution,
+        ),
+        probabilityAEqualsB: probabilityEqual(
+          aStats.distribution,
+          bStats.distribution,
+        ),
+        probabilityALessThanB: probabilityLessThan(
+          aStats.distribution,
+          bStats.distribution,
+        ),
+        totalVariationDistance: totalVariationDistance(
+          aStats.distribution,
+          bStats.distribution,
+        ),
+        klDivergenceAFromB: klDivergence(
+          aStats.distribution,
+          bStats.distribution,
+        ),
+        klDivergenceBFromA: klDivergence(
+          bStats.distribution,
+          aStats.distribution,
+        ),
+        meanDiff: aStats.mean - bStats.mean,
+        stddevDiff: aStats.stddev - bStats.stddev,
+      }
+      return { a: aResult, b: bResult, numeric }
+    }
+    return { a: aResult, b: bResult }
   },
 
   async *analyzeAsync(

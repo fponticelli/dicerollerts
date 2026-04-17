@@ -574,8 +574,15 @@ export class Roller {
 
   reduceResults(results: number[], reducer: DiceReducer): number {
     if (typeof reducer === 'object' && reducer.type === 'count') {
-      return results.filter((r) => Roller.matchRange(r, reducer.threshold))
-        .length
+      // Each die contributes 1 success per matching threshold. For the common
+      // single-threshold case this collapses to "count dice that match".
+      let total = 0
+      for (const r of results) {
+        for (const t of reducer.thresholds) {
+          if (Roller.matchRange(r, t)) total++
+        }
+      }
+      return total
     }
     switch (reducer) {
       case 'average':

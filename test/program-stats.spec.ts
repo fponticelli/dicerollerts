@@ -1604,3 +1604,70 @@ describe('program stats - parametric dice regression', () => {
     expect(r.success).toBe(true)
   })
 })
+
+describe('ProgramStats.compare', () => {
+  test('numeric comparison populated for numeric outputs', () => {
+    const a = parseProgram('`d6` + 5')
+    const b = parseProgram('`d6`')
+    const result = ProgramStats.compare(a, b)
+    expect(result.a.stats.type).toBe('number')
+    expect(result.b.stats.type).toBe('number')
+    expect(result.numeric).toBeDefined()
+    if (result.numeric) {
+      // a = d6+5 ranges 6..11; b = d6 ranges 1..6. Only overlap: 6.
+      // P(a > b) = most outcomes; P(a = b) = P(a=6)*P(b=6) = 1/36.
+      expect(result.numeric.probabilityAGreaterThanB).toBeGreaterThan(0.9)
+      expect(result.numeric.probabilityAEqualsB).toBeCloseTo(1 / 36, 10)
+      expect(
+        result.numeric.probabilityAGreaterThanB +
+          result.numeric.probabilityAEqualsB +
+          result.numeric.probabilityALessThanB,
+      ).toBeCloseTo(1, 10)
+      // meanDiff = 8.5 - 3.5 = 5
+      expect(result.numeric.meanDiff).toBeCloseTo(5, 10)
+      // Same shape (shifted), so stddev should be roughly equal.
+      expect(result.numeric.stddevDiff).toBeCloseTo(0, 10)
+    }
+  })
+
+  test('meanDiff correct for d20 vs d6', () => {
+    const a = parseProgram('`d20`')
+    const b = parseProgram('`d6`')
+    const result = ProgramStats.compare(a, b)
+    expect(result.numeric).toBeDefined()
+    if (result.numeric) {
+      // d20 mean = 10.5, d6 mean = 3.5 -> diff = 7
+      expect(result.numeric.meanDiff).toBeCloseTo(7, 10)
+    }
+  })
+
+  test('numeric comparison absent when output is a record', () => {
+    const a = parseProgram('{ x: `d6` }')
+    const b = parseProgram('{ x: `d8` }')
+    const result = ProgramStats.compare(a, b)
+    expect(result.a.stats.type).toBe('record')
+    expect(result.b.stats.type).toBe('record')
+    expect(result.numeric).toBeUndefined()
+  })
+
+  test('numeric comparison absent when one side is boolean', () => {
+    const a = parseProgram('`d20` >= 15')
+    const b = parseProgram('`d6`')
+    const result = ProgramStats.compare(a, b)
+    expect(result.a.stats.type).toBe('boolean')
+    expect(result.b.stats.type).toBe('number')
+    expect(result.numeric).toBeUndefined()
+  })
+
+  test('includes per-program analyses', () => {
+    const a = parseProgram('`d6`')
+    const b = parseProgram('`d8`')
+    const result = ProgramStats.compare(a, b)
+    expect(result.a.stats.type).toBe('number')
+    expect(result.b.stats.type).toBe('number')
+    if (result.a.stats.type === 'number' && result.b.stats.type === 'number') {
+      expect(result.a.stats.mean).toBeCloseTo(3.5, 10)
+      expect(result.b.stats.mean).toBeCloseTo(4.5, 10)
+    }
+  })
+})

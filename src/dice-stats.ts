@@ -437,7 +437,14 @@ function enumerateCombinations(dists: Distribution[]): Combination[] {
 
 function reduceValues(values: number[], reducer: DiceReducer): number {
   if (typeof reducer === 'object') {
-    return values.filter((r) => Roller.matchRange(r, reducer.threshold)).length
+    // Each die contributes 1 success per matching threshold (multi-step counts).
+    let total = 0
+    for (const v of values) {
+      for (const t of reducer.thresholds) {
+        if (Roller.matchRange(v, t)) total++
+      }
+    }
+    return total
   }
   switch (reducer) {
     case 'sum':

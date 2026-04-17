@@ -128,15 +128,41 @@ Roll two dice, keep the result furthest from a center point.
 
 ### Dice Pools / Success Counting
 
-Count how many dice meet a threshold.
+Count how many dice meet a threshold. Thresholds can be expressed with
+operators, English "on ..." triggers, bare numbers, or the `exactly` keyword.
+Multiple thresholds may be chained with `and` so each die contributes one
+success per matching threshold.
 
-| Notation          | Shorthand | Description          |
-| ----------------- | --------- | -------------------- |
-| `8d10 count >= 6` | `8d10c6`  | Count successes >= 6 |
-| `3d6 count = 5`   |           | Count exact 5s       |
-| `4d6 count <= 2`  |           | Count values <= 2    |
-| `4d6 count > 4`   |           | Count values > 4     |
-| `4d6 count < 3`   |           | Count values < 3     |
+| Notation                      | Shorthand | Description                                             |
+| ----------------------------- | --------- | ------------------------------------------------------- |
+| `8d10 count >= 6`             | `8d10c6`  | Count successes >= 6                                    |
+| `8d10 count on 6 or more`     |           | Same, English trigger form                              |
+| `3d6 count = 5`               |           | Count exact 5s                                          |
+| `3d6 count exactly 5`         |           | Same, keyword form                                      |
+| `3d6 count on 5`              |           | Same, trigger form                                      |
+| `3d6 count 5`                 |           | Same, bare-number form                                  |
+| `3d6 count on 3..5`           |           | Count dice between 3 and 5 inclusive                    |
+| `4d6 count <= 2`              |           | Count values <= 2                                       |
+| `4d6 count > 4`               |           | Count values > 4 (canonicalizes to `>= 5`)              |
+| `4d6 count < 3`               |           | Count values < 3 (canonicalizes to `<= 2`)              |
+| `5d10 count 6 or more and 10` |           | Multi-step: each die counts once per matching threshold |
+
+#### Multi-step counts
+
+Chain thresholds with `and` to give each die one success per matching
+threshold. For example, `5d10 count 6 or more and 10`: a 10 matches BOTH
+`>= 6` and `= 10`, so that die contributes 2 successes; a 7 only matches
+`>= 6` and contributes 1; a 3 matches neither and contributes 0. Operator,
+English, and bare forms can be mixed:
+
+```
+5d10 count 6 or more and 10
+d12 count 6 or more and 8 or more and 10 or more and 12
+8d10 count >= 6 and 10
+```
+
+The `and` separator only has this meaning inside a `count` reducer. Outside
+dice expressions it is still the boolean `and` operator.
 
 ## API
 
@@ -547,10 +573,49 @@ import {
   totalVariationDistance,
   klDivergence, // distribution comparison
   probabilityGreaterThan, // P(X > Y) for independent X, Y
+  probabilityLessThan, // P(X < Y)
+  probabilityEqual, // P(X == Y)
+  boxPlotData, // quartiles / whiskers / outliers for a numeric distribution
   sampleFromDistribution, // sample from a distribution
   fieldFromRecord,
   elementFromArray, // accessor helpers
 } from 'dicerollerts'
+```
+
+### Comparing two programs
+
+`ProgramStats.compare(a, b, options?)` analyzes both programs and, when both
+produce a numeric output, returns a `numeric` summary combining the two
+distributions:
+
+```ts
+const result = ProgramStats.compare(programA, programB)
+result.a.stats // AnalyzeResult for programA
+result.b.stats // AnalyzeResult for programB
+result.numeric?.probabilityAGreaterThanB
+result.numeric?.probabilityAEqualsB
+result.numeric?.probabilityALessThanB
+result.numeric?.totalVariationDistance
+result.numeric?.klDivergenceAFromB // may be Infinity when supports disjoint
+result.numeric?.klDivergenceBFromA
+result.numeric?.meanDiff // mean(a) - mean(b)
+result.numeric?.stddevDiff // stddev(a) - stddev(b)
+```
+
+When either program's output is non-numeric (record, array, boolean, string,
+mixed), the `numeric` field is omitted; the per-program analyses are still
+available.
+
+### Box plot data
+
+`boxPlotData(distribution)` returns quartiles, IQR-based whiskers, and
+outliers suitable for driving a box plot visualization:
+
+```ts
+const bp = boxPlotData(dist)
+;(bp.min, bp.q1, bp.median, bp.q3, bp.max)
+;(bp.iqr, bp.lowerWhisker, bp.upperWhisker)
+bp.outliers // values outside [lowerWhisker, upperWhisker], sorted
 ```
 
 ### Distribution algebra (lower-level API)
@@ -627,7 +692,13 @@ const fateDice = diceReduce(
 // 8d10 count >= 6
 const dicePool = diceReduce(
   diceExpressions(...Array.from({ length: 8 }, () => die(10))),
-  { type: 'count', threshold: valueOrMore(6) },
+  { type: 'count', thresholds: [valueOrMore(6)] },
+)
+
+// 5d10 count 6 or more and 10 (multi-step; a 10 counts twice)
+const multiStepPool = diceReduce(
+  diceExpressions(...Array.from({ length: 5 }, () => die(10))),
+  { type: 'count', thresholds: [valueOrMore(6), exact(10)] },
 )
 ```
 

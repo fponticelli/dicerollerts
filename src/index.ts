@@ -220,6 +220,8 @@ export {
   type AnalyzeAsyncOptions,
   type AsyncProgress,
   type AnalyzeDiagnostics,
+  type CompareResult,
+  type NumericComparison,
 } from './program-stats'
 export { ProgramParser, type ParseProgramResult } from './program-parser'
 export {
@@ -228,6 +230,10 @@ export {
   totalVariationDistance,
   klDivergence,
   probabilityGreaterThan,
+  probabilityLessThan,
+  probabilityEqual,
+  boxPlotData,
+  type BoxPlotData,
   sampleFromDistribution,
   fieldFromRecord,
   elementFromArray,

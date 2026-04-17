@@ -180,7 +180,7 @@ describe('non-sum reducers in exact analysis', () => {
   test('4d6 count >= 4 distribution', () => {
     const expr = diceReduce(diceExpressions(die(6), die(6), die(6), die(6)), {
       type: 'count',
-      threshold: valueOrMore(4),
+      thresholds: [valueOrMore(4)],
     })
     const dist = DiceStats.distribution(expr)
     expect(dist.size).toBe(5) // 0, 1, 2, 3, 4

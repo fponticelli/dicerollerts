@@ -344,6 +344,136 @@ export function probabilityGreaterThan(
   return p
 }
 
+/**
+ * Probability that X < Y for independent X ~ `a`, Y ~ `b`.
+ */
+export function probabilityLessThan(
+  a: Map<number, number>,
+  b: Map<number, number>,
+): number {
+  let p = 0
+  for (const [xv, xp] of a) {
+    if (xp === 0) continue
+    for (const [yv, yp] of b) {
+      if (yp === 0) continue
+      if (xv < yv) p += xp * yp
+    }
+  }
+  return p
+}
+
+/**
+ * Probability that X == Y for independent X ~ `a`, Y ~ `b`.
+ */
+export function probabilityEqual(
+  a: Map<number, number>,
+  b: Map<number, number>,
+): number {
+  let p = 0
+  for (const [xv, xp] of a) {
+    if (xp === 0) continue
+    const yp = b.get(xv)
+    if (yp === undefined || yp === 0) continue
+    p += xp * yp
+  }
+  return p
+}
+
+/**
+ * Box plot data for a numeric distribution: quartiles, whiskers, outliers.
+ * Uses the standard 1.5*IQR rule for whisker extents, clamped to the actual
+ * minimum and maximum values present in the distribution.
+ */
+export interface BoxPlotData {
+  min: number
+  q1: number
+  median: number
+  q3: number
+  max: number
+  iqr: number
+  /** q1 - 1.5 * iqr, clamped to the smallest value with nonzero probability. */
+  lowerWhisker: number
+  /** q3 + 1.5 * iqr, clamped to the largest value with nonzero probability. */
+  upperWhisker: number
+  /** Values with nonzero probability that fall outside the whisker range, sorted. */
+  outliers: number[]
+}
+
+/**
+ * Compute box-plot data for a numeric distribution. Quartiles use the
+ * "first value with cumulative probability >= p" rule (matches
+ * `program-stats`' `percentileFromCdf`). For empty or invalid distributions,
+ * throws.
+ */
+export function boxPlotData(dist: Map<number, number>): BoxPlotData {
+  const entries = Array.from(dist.entries())
+    .filter(([, p]) => p > 0)
+    .sort((a, b) => a[0] - b[0])
+  if (entries.length === 0) {
+    throw new Error('Cannot compute box plot data for an empty distribution')
+  }
+  let total = 0
+  for (const [, p] of entries) total += p
+  if (total <= 0) {
+    throw new Error('Distribution has non-positive total probability')
+  }
+  // Build a normalized CDF.
+  const cdf: [number, number][] = []
+  let acc = 0
+  for (let i = 0; i < entries.length; i++) {
+    acc += entries[i][1] / total
+    // Guard against floating-point drift for the last entry.
+    cdf.push([entries[i][0], i === entries.length - 1 ? 1 : acc])
+  }
+  const percentile = (p: number): number => {
+    for (const [v, cum] of cdf) {
+      if (cum >= p) return v
+    }
+    return cdf[cdf.length - 1][0]
+  }
+  const minVal = entries[0][0]
+  const maxVal = entries[entries.length - 1][0]
+  const q1 = percentile(0.25)
+  const median = percentile(0.5)
+  const q3 = percentile(0.75)
+  const iqr = q3 - q1
+  const lowerBound = q1 - 1.5 * iqr
+  const upperBound = q3 + 1.5 * iqr
+
+  // Whiskers extend to the nearest data point within the fence bounds.
+  let lowerWhisker = minVal
+  for (const [v] of cdf) {
+    if (v >= lowerBound) {
+      lowerWhisker = v
+      break
+    }
+  }
+  let upperWhisker = maxVal
+  for (let i = cdf.length - 1; i >= 0; i--) {
+    const v = cdf[i][0]
+    if (v <= upperBound) {
+      upperWhisker = v
+      break
+    }
+  }
+  const outliers: number[] = []
+  for (const [v] of cdf) {
+    if (v < lowerWhisker || v > upperWhisker) outliers.push(v)
+  }
+  outliers.sort((a, b) => a - b)
+  return {
+    min: minVal,
+    q1,
+    median,
+    q3,
+    max: maxVal,
+    iqr,
+    lowerWhisker,
+    upperWhisker,
+    outliers,
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Random sampling
 // ---------------------------------------------------------------------------

@@ -4,6 +4,9 @@ import {
   totalVariationDistance,
   klDivergence,
   probabilityGreaterThan,
+  probabilityLessThan,
+  probabilityEqual,
+  boxPlotData,
   sampleFromDistribution,
   fieldFromRecord,
   elementFromArray,
@@ -539,5 +542,138 @@ describe('sampleFromDistribution - edge cases', () => {
     // rng returning 1 picks value at last CDF entry (which is normalized to 1)
     const samples = sampleFromDistribution(dist, 3, () => 1)
     expect(samples.every((s) => s === 2)).toBe(true)
+  })
+})
+
+describe('probabilityLessThan', () => {
+  test('disjoint: a always less than b', () => {
+    const a = new Map([
+      [1, 0.5],
+      [2, 0.5],
+    ])
+    const b = new Map([
+      [3, 0.5],
+      [4, 0.5],
+    ])
+    expect(probabilityLessThan(a, b)).toBe(1)
+  })
+
+  test('disjoint: a always greater than b', () => {
+    const a = new Map([[5, 1]])
+    const b = new Map([[1, 1]])
+    expect(probabilityLessThan(a, b)).toBe(0)
+  })
+
+  test('equal values not counted as less', () => {
+    const a = new Map([[2, 1]])
+    const b = new Map([[2, 1]])
+    expect(probabilityLessThan(a, b)).toBe(0)
+  })
+
+  test('simple mix', () => {
+    const a = new Map([
+      [1, 0.5],
+      [2, 0.5],
+    ])
+    const b = new Map([
+      [1, 0.5],
+      [2, 0.5],
+    ])
+    // P(X<Y): (1,2) = 0.25; total = 0.25.
+    expect(probabilityLessThan(a, b)).toBeCloseTo(0.25, 10)
+  })
+})
+
+describe('probabilityEqual', () => {
+  test('identical singletons', () => {
+    const a = new Map([[5, 1]])
+    const b = new Map([[5, 1]])
+    expect(probabilityEqual(a, b)).toBe(1)
+  })
+
+  test('disjoint supports', () => {
+    const a = new Map([[1, 1]])
+    const b = new Map([[2, 1]])
+    expect(probabilityEqual(a, b)).toBe(0)
+  })
+
+  test('partial overlap', () => {
+    const a = new Map([
+      [1, 0.5],
+      [2, 0.5],
+    ])
+    const b = new Map([
+      [2, 0.5],
+      [3, 0.5],
+    ])
+    // P(X=Y) = P(X=2)*P(Y=2) = 0.25
+    expect(probabilityEqual(a, b)).toBeCloseTo(0.25, 10)
+  })
+
+  test('symmetric property: P(>) + P(=) + P(<) = 1', () => {
+    const a = new Map<number, number>()
+    const b = new Map<number, number>()
+    for (let i = 1; i <= 6; i++) a.set(i, 1 / 6)
+    for (let i = 1; i <= 8; i++) b.set(i, 1 / 8)
+    const gt = probabilityGreaterThan(a, b)
+    const eq = probabilityEqual(a, b)
+    const lt = probabilityLessThan(a, b)
+    expect(gt + eq + lt).toBeCloseTo(1, 10)
+  })
+})
+
+describe('boxPlotData', () => {
+  test('d6 quartiles', () => {
+    const d6 = new Map<number, number>()
+    for (let i = 1; i <= 6; i++) d6.set(i, 1 / 6)
+    const bp = boxPlotData(d6)
+    expect(bp.min).toBe(1)
+    expect(bp.max).toBe(6)
+    // Using the "first value with cumulative prob >= p" rule:
+    //   p25 -> cumulative reaches 0.25 at value 2
+    //   p50 -> cumulative reaches 0.5 at value 3
+    //   p75 -> cumulative reaches 0.75 at value 5
+    expect(bp.q1).toBe(2)
+    expect(bp.median).toBe(3)
+    expect(bp.q3).toBe(5)
+    expect(bp.iqr).toBe(3)
+    // lowerBound = 2 - 4.5 = -2.5 -> clamped to 1
+    // upperBound = 5 + 4.5 = 9.5 -> clamped to 6
+    expect(bp.lowerWhisker).toBe(1)
+    expect(bp.upperWhisker).toBe(6)
+    expect(bp.outliers).toEqual([])
+  })
+
+  test('detects outliers on skewed distribution', () => {
+    // Mostly 1..5 with a single extreme outlier at 100.
+    const dist = new Map<number, number>()
+    const baseProb = 0.999 / 5
+    for (let i = 1; i <= 5; i++) dist.set(i, baseProb)
+    dist.set(100, 0.001)
+    const bp = boxPlotData(dist)
+    expect(bp.min).toBe(1)
+    expect(bp.max).toBe(100)
+    // With the cumulative rule, q3 on 1..5 and a rare 100 is 4; iqr small.
+    expect(bp.outliers).toContain(100)
+    expect(bp.upperWhisker).toBeLessThan(100)
+  })
+
+  test('singleton distribution has zero IQR and no outliers', () => {
+    const dist = new Map([[7, 1]])
+    const bp = boxPlotData(dist)
+    expect(bp.min).toBe(7)
+    expect(bp.max).toBe(7)
+    expect(bp.q1).toBe(7)
+    expect(bp.median).toBe(7)
+    expect(bp.q3).toBe(7)
+    expect(bp.iqr).toBe(0)
+    expect(bp.lowerWhisker).toBe(7)
+    expect(bp.upperWhisker).toBe(7)
+    expect(bp.outliers).toEqual([])
+  })
+
+  test('throws on empty distribution', () => {
+    const empty = new Map<number, number>()
+    expect(() => boxPlotData(empty)).toThrow()
   })
 })

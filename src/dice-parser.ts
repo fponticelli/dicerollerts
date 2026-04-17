@@ -208,42 +208,51 @@ const LTE = match('<=')
 const GT = matchChar('>')
 const LT = matchChar('<')
 const EQ = matchChar('=')
+const AND = match('and')
+const EXACTLY = match('exactly')
+const DOTDOT = match('..')
+
+// Range body after an optional `on` keyword. Accepts:
+//   - `N or more` -> valueOrMore(N)
+//   - `N or less` -> valueOrLess(N)
+//   - `N..M`      -> between(N, M)
+//   - `N`         -> exact(N)
+const rangeBody: Decoder<TextInput, Range, DecodeError> = positive.flatMap(
+  (n) =>
+    oneOf(
+      OWS.skipNext(DOTDOT)
+        .skipNext(OWS)
+        .pickNext(positive.map((m) => between(n, m))),
+      WS.pickNext(orMoreLess).map((oml) =>
+        oml === 'more' ? valueOrMore(n) : valueOrLess(n),
+      ),
+      Decoder.of(
+        (input: TextInput): DecodeResult<TextInput, Range, DecodeError> =>
+          decodeSuccess<TextInput, Range, DecodeError>(input, exact(n)),
+      ),
+    ),
+)
+
+// One threshold inside a `count` reducer. Supports operator forms (>=, <=, >,
+// <, =), trigger forms (`on N or more`, `on N or less`, `on N..M`, `on N`),
+// the keyword form `exactly N`, and the bare form (`N or more`, `N..M`, `N`).
+// Strict `>` / `<` translate to `value-or-more(v+1)` / `value-or-less(v-1)`.
+const singleCountThreshold: Decoder<TextInput, Range, DecodeError> = oneOf(
+  GTE.skipNext(OWS).pickNext(positive.map((v) => valueOrMore(v))),
+  LTE.skipNext(OWS).pickNext(positive.map((v) => valueOrLess(v))),
+  GT.skipNext(OWS).pickNext(positive.map((v) => valueOrMore(v + 1))),
+  LT.skipNext(OWS).pickNext(positive.map((v) => valueOrLess(v - 1))),
+  EQ.skipNext(OWS).pickNext(positive.map((v) => exact(v))),
+  EXACTLY.skipNext(WS).pickNext(positive.map((v) => exact(v))),
+  match('on').skipNext(WS).pickNext(rangeBody),
+  rangeBody,
+)
 
 const countThreshold: Decoder<TextInput, CountReducer, DecodeError> =
   COUNT.skipNext(WS).pickNext(
-    oneOf(
-      GTE.skipNext(OWS).pickNext(
-        positive.map(
-          (v): CountReducer => ({ type: 'count', threshold: valueOrMore(v) }),
-        ),
-      ),
-      LTE.skipNext(OWS).pickNext(
-        positive.map(
-          (v): CountReducer => ({ type: 'count', threshold: valueOrLess(v) }),
-        ),
-      ),
-      GT.skipNext(OWS).pickNext(
-        positive.map(
-          (v): CountReducer => ({
-            type: 'count',
-            threshold: valueOrMore(v + 1),
-          }),
-        ),
-      ),
-      LT.skipNext(OWS).pickNext(
-        positive.map(
-          (v): CountReducer => ({
-            type: 'count',
-            threshold: valueOrLess(v - 1),
-          }),
-        ),
-      ),
-      EQ.skipNext(OWS).pickNext(
-        positive.map(
-          (v): CountReducer => ({ type: 'count', threshold: exact(v) }),
-        ),
-      ),
-    ),
+    singleCountThreshold
+      .atLeastWithSeparator(1, WS.skipNext(AND).skipNext(WS))
+      .map((thresholds): CountReducer => ({ type: 'count', thresholds })),
   )
 
 const SUM = match('sum')
@@ -686,7 +695,7 @@ const diceCountShorthand = lazy(
                     ),
                     {
                       type: 'count' as const,
-                      threshold: valueOrMore(v),
+                      thresholds: [valueOrMore(v)],
                     } as CountReducer,
                   ),
               )
@@ -705,7 +714,7 @@ const diceCountShorthand = lazy(
                   homogeneousDiceExpressions(nDiceVar(countVar), sides),
                   {
                     type: 'count' as const,
-                    threshold: valueOrMore(v),
+                    thresholds: [valueOrMore(v)],
                   } as CountReducer,
                 ),
             )
