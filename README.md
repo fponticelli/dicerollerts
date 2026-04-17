@@ -335,7 +335,7 @@ The input kind is inferred by the consumer from the data: number with `min` and 
 `ProgramStats.analyze()` picks one of three strategies:
 
 - **`constant`** - no randomness, single evaluation
-- **`exact`** - covers single dice expressions, comparisons, conditionals, arithmetic on independent distributions, shared variables (via joint enumeration), boolean ops, and categorical conditionals
+- **`exact`** - covers single dice expressions, comparisons, conditionals, arithmetic on independent distributions, shared variables (via joint enumeration), boolean ops, categorical conditionals, and discriminated outputs (per-variant conditional stats)
 - **`monte-carlo`** - adaptive batched simulation, stops when per-bin frequencies stabilize
 
 ```ts
@@ -385,6 +385,38 @@ and is not included in the per-variant stats.
 If trials produce records with different keys but no `kind` field,
 the analyzer falls back to grouping by key set (`discriminator: 'shape'`).
 For consistent UI rendering, prefer the `kind` convention.
+
+### Conditional field stats
+
+When a variant's field references the same dice as the discriminating
+condition, the field's stats are computed _conditional on that variant
+being chosen_:
+
+```
+$attack = `d20`
+if $attack >= 11
+  then { kind: "hit", attack: $attack }
+  else { kind: "miss", attack: $attack }
+```
+
+The `hit` variant's `attack` field has distribution {11..20} (each 1/10),
+not the unconditional {1..20}. Same for the `miss` variant: {1..10}.
+
+This works for arbitrary if-then-else ladders and is computed exactly
+when feasible. Very large joint distributions (cap: 100,000 entries)
+fall back to Monte Carlo with the same shape.
+
+`DiscriminatedVariant` shape:
+
+```ts
+interface DiscriminatedVariant {
+  tag: string // kind value or shape signature
+  probability: number // share of trials matching this variant
+  standardError?: number // stderr (Monte Carlo only)
+  keys: string[] // field names in this variant (excluding kind)
+  fields: Record<string, FieldStats> // marginal stats per field, conditional on variant
+}
+```
 
 Helpers for charting:
 
