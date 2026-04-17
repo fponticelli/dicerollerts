@@ -6,6 +6,8 @@ import {
   type Roll,
   type DiceExpression,
   type DiceReduce,
+  type NDice,
+  type NDiceParam,
   die,
 } from './dice-expression'
 import {
@@ -116,6 +118,9 @@ const DEFAULT_OPTIONS: RollerOptions = {
   maxRerollIterations: 100,
   maxEmphasisIterations: 100,
 }
+
+/** Maximum number of dice that can be rolled by a single n-dice expression. */
+export const MAX_DICE_COUNT = 10000
 
 export class Roller {
   static matchRange(r: number, range: Range): boolean {
@@ -277,9 +282,49 @@ export class Roller {
         throw new Error(`Undefined variable: $${expr.name}`)
       }
       return literalResult(value, value)
+    } else if (expr.type === 'n-dice') {
+      return this.rollNDice(expr)
     } else {
       throw new Error(`Invalid expressions ${JSON.stringify(expr)}`)
     }
+  }
+
+  private resolveNDiceParam(p: NDiceParam, role: 'count' | 'sides'): number {
+    if (p.kind === 'literal') return p.value
+    const value = this.variables?.[p.name]
+    if (value === undefined) {
+      throw new Error(`Undefined variable: $${p.name}`)
+    }
+    if (!Number.isFinite(value) || !Number.isInteger(value)) {
+      throw new Error(
+        `Variable $${p.name} must be an integer for dice ${role}, got ${value}`,
+      )
+    }
+    return value
+  }
+
+  private rollNDice(expr: NDice): RollResult {
+    const count = this.resolveNDiceParam(expr.count, 'count')
+    const sides = this.resolveNDiceParam(expr.sides, 'sides')
+    if (count > MAX_DICE_COUNT) {
+      throw new Error(`dice count exceeds maximum (${MAX_DICE_COUNT})`)
+    }
+    if (count <= 0) {
+      // No dice rolled. Mirror "0 + ... " by returning a dice-reduce-result
+      // of an empty dice-expressions sum.
+      return diceReduceResult(diceExpressionsResult([]), 'sum', 0)
+    }
+    if (sides <= 0) {
+      throw new Error(`dice sides must be positive, got ${sides}`)
+    }
+    const rolls: RollResult[] = []
+    let total = 0
+    for (let i = 0; i < count; i++) {
+      const r = this.dieRoll(sides)
+      rolls.push(oneResult(dieResult(r, sides)))
+      total += r
+    }
+    return diceReduceResult(diceExpressionsResult(rolls), 'sum', total)
   }
 
   mapRolls(rolls: DieResult[], functor: DiceFunctor): DiceResultMapped[] {

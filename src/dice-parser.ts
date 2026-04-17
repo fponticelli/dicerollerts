@@ -35,11 +35,20 @@ import {
   type DiceFilterable,
   emphasis,
   customDie as makeCustomDie,
+  type NDiceParam,
+  nDice as makeNDice,
+  nDiceLit,
+  nDiceVar,
+  diceVariableRef as makeDiceVariableRef,
 } from './dice-expression'
 import { CustomError, type DecodeError } from 'partsing/error'
 import { buildParseErrors, type ParseWithErrorsResult } from './parse-error'
-import { type Decoder } from 'partsing/core/decoder'
-import { type DecodeResult } from 'partsing/core/result'
+import { Decoder } from 'partsing/core/decoder'
+import {
+  type DecodeResult,
+  success as decodeSuccess,
+  failure as decodeFailure,
+} from 'partsing/core/result'
 import { matchChar, regexp, match, matchAnyCharOf, eoi } from 'partsing/text'
 import { oneOf, lazy } from 'partsing/core/decoder'
 
@@ -244,6 +253,95 @@ const die = oneOf(
   D.pickNext(positive),
   D.withResult(DEFAULT_DIE_SIDES),
 ).withFailure(new CustomError('one die'))
+
+// Match a `$name` variable reference. Names follow the same rules as the
+// program parser: lowercase letter or underscore, followed by lowercase,
+// digit, or underscore.
+const VAR_NAME = regexp(/^\$([a-z_][a-z0-9_]*)/, 1).withFailure(
+  new CustomError('variable reference'),
+)
+
+const variableRefExpr = VAR_NAME.map(makeDiceVariableRef)
+
+// Match either a literal positive integer or a $variable as an n-dice param.
+const nDiceCount: Decoder<TextInput, NDiceParam, DecodeError> = oneOf(
+  positive.map(nDiceLit) as Decoder<TextInput, NDiceParam, DecodeError>,
+  VAR_NAME.map(nDiceVar) as Decoder<TextInput, NDiceParam, DecodeError>,
+)
+
+// Reducer keywords that, when following an n-dice form, indicate the
+// expression should be parsed via the dice-reduce path instead. We look for
+// these to decide whether to commit to NDice or fall through.
+const REDUCER_LOOKAHEAD =
+  /^[\s_]*(sum|average|avg|median|med|minimum|min|maximum|max|take\s+least|take\s+best|count\s+|c\s*[1-9]|d\s*[1-9]|k\s*[1-9]|drop\s|keep\s|explode|reroll|compound|emphasis|furthest\s+from|ce\s*[1-9]|e\s*[1-9]|r\s*[1-9])/
+
+const noReducerLookahead: Decoder<TextInput, void, DecodeError> = Decoder.of(
+  (input: TextInput): DecodeResult<TextInput, void, DecodeError> => {
+    const remaining = input.input.substring(input.index)
+    if (REDUCER_LOOKAHEAD.test(remaining)) {
+      return decodeFailure<TextInput, void, DecodeError>(
+        input,
+        new CustomError('not a reducer'),
+      )
+    }
+    return decodeSuccess<TextInput, void, DecodeError>(input, undefined)
+  },
+)
+
+const defaultNDiceSides: Decoder<TextInput, NDiceParam, DecodeError> =
+  Decoder.of(
+    (input: TextInput): DecodeResult<TextInput, NDiceParam, DecodeError> =>
+      decodeSuccess<TextInput, NDiceParam, DecodeError>(
+        input,
+        nDiceLit(DEFAULT_DIE_SIDES),
+      ),
+  )
+
+const nDiceSides: Decoder<TextInput, NDiceParam, DecodeError> = oneOf(
+  PERCENT.withResult(nDiceLit(100)) as Decoder<
+    TextInput,
+    NDiceParam,
+    DecodeError
+  >,
+  VAR_NAME.map(nDiceVar) as Decoder<TextInput, NDiceParam, DecodeError>,
+  positive.map(nDiceLit) as Decoder<TextInput, NDiceParam, DecodeError>,
+  defaultNDiceSides,
+)
+
+// Plain `Nd<sides>` form (no reducer/functor/filter). Always produces an
+// NDice node — never expands at parse time. Supports parametric forms via
+// $vars in count and/or sides positions.
+//
+// To preserve existing AST shape, we don't take the simplest case
+// (count=1 literal AND sides literal) — that falls through to `dieExpression`
+// which produces a `Die(sides)` node directly. NDice is used whenever
+// count > 1, count is a variable, or sides is a variable.
+const nDicePlain: Decoder<TextInput, DiceExpression, DecodeError> =
+  nDiceCount.flatMap((count) => {
+    return D.pickNext(
+      nDiceSides.flatMap((sides) => {
+        // Skip the trivial `1d<literal>` case (handled by dieExpression).
+        if (
+          count.kind === 'literal' &&
+          count.value === 1 &&
+          sides.kind === 'literal'
+        ) {
+          return Decoder.of(
+            (
+              input: TextInput,
+            ): DecodeResult<TextInput, DiceExpression, DecodeError> =>
+              decodeFailure<TextInput, DiceExpression, DecodeError>(
+                input,
+                new CustomError('not parametric'),
+              ),
+          )
+        }
+        return noReducerLookahead.map(
+          (): DiceExpression => makeNDice(count, sides),
+        )
+      }),
+    )
+  })
 
 const negate = lazy(() =>
   MINUS.pickNext(termExpression).map((expr) => unaryOp('negate', expr)),
@@ -489,10 +587,17 @@ const termExpression = lazy(
       diceReduce(diceFilterable),
       fateDieExpression,
       diceCountShorthand,
+      // Plain Nd<sides> form: parse as a single NDice node when no reducer
+      // follows. This avoids parse-time expansion (so `100000d6` parses
+      // without freezing) and supports parametric forms ($var in count
+      // and/or sides positions).
+      nDicePlain,
       diceReduce(diceExpressions),
       customDieExpression,
       dieExpression,
       literalExpression,
+      // $var as a standalone term (e.g., `d20 + $mod`).
+      variableRefExpr,
       unary,
     )
   },

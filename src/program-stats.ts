@@ -913,6 +913,10 @@ function countDiceVarRefs(
     case 'unary-op':
       countDiceVarRefs(expr.expr, onName)
       return
+    case 'n-dice':
+      if (expr.count.kind === 'variable') onName(expr.count.name)
+      if (expr.sides.kind === 'variable') onName(expr.sides.name)
+      return
     case 'dice-reduce': {
       const r = expr.reduceable
       switch (r.type) {
@@ -2144,6 +2148,8 @@ function diceExpressionHasVarRef(expr: DiceExpression): boolean {
       )
     case 'unary-op':
       return diceExpressionHasVarRef(expr.expr)
+    case 'n-dice':
+      return expr.count.kind === 'variable' || expr.sides.kind === 'variable'
     case 'dice-reduce': {
       const r = expr.reduceable
       switch (r.type) {

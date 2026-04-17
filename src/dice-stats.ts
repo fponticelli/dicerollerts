@@ -4,6 +4,7 @@ import type {
   DiceReducer,
   DiceBinOp,
   DiceFunctor,
+  NDice,
   Sides,
 } from './dice-expression'
 import { DE } from './dice-expression-domain'
@@ -57,7 +58,38 @@ function distributionOf(expr: DiceExpression): Distribution {
         `Cannot compute distribution for variable reference: $${expr.name}`,
       )
     }
+    case 'n-dice': {
+      return distributeNDice(expr)
+    }
   }
+}
+
+function distributeNDice(expr: NDice): Distribution {
+  if (expr.count.kind !== 'literal' || expr.sides.kind !== 'literal') {
+    // Variable count or sides: cannot compute exact distribution without
+    // knowing the variable's distribution. Caller must handle (e.g., via
+    // ProgramStats which has access to bindings).
+    throw new Error(
+      `Cannot compute distribution for parametric n-dice with variable parameters`,
+    )
+  }
+  const count = expr.count.value
+  const sides = expr.sides.value
+  if (count <= 0) {
+    return new Map([[0, 1]])
+  }
+  if (sides <= 0) {
+    throw new Error(`dice sides must be positive, got ${sides}`)
+  }
+  // Sum of N independent d<sides>: convolve the per-die distribution.
+  const oneDie: Distribution = new Map()
+  const p = 1 / sides
+  for (let i = 1; i <= sides; i++) oneDie.set(i, p)
+  let result: Distribution = new Map([[0, 1]])
+  for (let i = 0; i < count; i++) {
+    result = combineBinary(result, oneDie, 'sum')
+  }
+  return result
 }
 
 function applyBinOp(op: DiceBinOp, a: number, b: number): number {

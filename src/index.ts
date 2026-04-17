@@ -36,6 +36,9 @@ export {
   valueOrLess,
   valueOrMore,
   diceVariableRef,
+  nDice,
+  nDiceLit,
+  nDiceVar,
 } from './dice-expression'
 
 export type {
@@ -81,6 +84,8 @@ export type {
   ValueOrLess,
   ValueOrMore,
   DiceVariableRef,
+  NDice,
+  NDiceParam,
 } from './dice-expression'
 
 export { DiceParser } from './dice-parser'
@@ -128,7 +133,7 @@ export {
   unaryOpResult,
 } from './roll-result'
 
-export { Roller, type RollerOptions } from './roller'
+export { Roller, type RollerOptions, MAX_DICE_COUNT } from './roller'
 
 export { DiceStats } from './dice-stats'
 

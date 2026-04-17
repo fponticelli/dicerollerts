@@ -7,6 +7,8 @@ import {
   type DiceReduce,
   type DiceReduceable,
   type DiceUnOp,
+  type NDice,
+  type NDiceParam,
   type Range,
   type Sides,
   type Times,
@@ -85,6 +87,20 @@ function unaryOpToString(op: DiceUnOp): string {
   }
 }
 
+function nDiceParamToString(p: NDiceParam): string {
+  return p.kind === 'literal' ? String(p.value) : `$${p.name}`
+}
+
+function nDiceToString(expr: NDice): string {
+  // All-literal -> use lowercase 'd' to match standard dice notation,
+  // and apply existing shortcuts (d% for sides=100, drop count when count=1).
+  if (expr.count.kind === 'literal' && expr.sides.kind === 'literal') {
+    return DE.diceToString(expr.count.value, expr.sides.value)
+  }
+  // Parametric form -> uppercase D by convention.
+  return `${nDiceParamToString(expr.count)}D${nDiceParamToString(expr.sides)}`
+}
+
 export const DE = {
   toString(expr: DiceExpression): string {
     if (expr.type === 'literal') {
@@ -103,6 +119,8 @@ export const DE = {
       return `${unaryOpToString(expr.op)}${DE.toString(expr.expr)}`
     } else if (expr.type === 'dice-variable-ref') {
       return `$${expr.name}`
+    } else if (expr.type === 'n-dice') {
+      return nDiceToString(expr)
     } else {
       throw new Error(`Unknown expression type: ${String(expr)}`)
     }
@@ -327,6 +345,10 @@ export const DE = {
         return DE.calculateBasicRollsReduceable(expr.reduceable)
       case 'dice-variable-ref':
         return 0
+      case 'n-dice':
+        // Literal count contributes that many rolls; variable count is unknown
+        // until evaluation, so contribute a conservative 1.
+        return expr.count.kind === 'literal' ? expr.count.value : 1
     }
   },
 
@@ -354,6 +376,15 @@ export const DE = {
         return DE.validateDiceReduceable(expr.reduceable)
       case 'dice-variable-ref':
         return []
+      case 'n-dice': {
+        const errors: ValidationMessage[] = []
+        if (expr.sides.kind === 'literal' && expr.sides.value <= 0) {
+          errors.push(insufficientSides(expr.sides.value))
+        }
+        // Note: literal count <= 0 is allowed at validation time (returns 0
+        // when rolled). Variable count/sides validate at runtime.
+        return errors
+      }
     }
   },
 
@@ -470,6 +501,8 @@ export const DE = {
       case 'dice-reduce':
         return expr
       case 'dice-variable-ref':
+        return expr
+      case 'n-dice':
         return expr
     }
   },

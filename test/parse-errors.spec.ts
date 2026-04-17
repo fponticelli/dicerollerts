@@ -5,7 +5,9 @@ describe('parser error messages', () => {
     const result = DiceParser.parseWithErrors('3d6')
     expect(result.success).toBe(true)
     if (result.success) {
-      expect(result.value.type).toBe('dice-reduce')
+      // Plain Nd6 form now parses to a single n-dice node (not expanded
+      // into N separate die nodes).
+      expect(result.value.type).toBe('n-dice')
     }
   })
 

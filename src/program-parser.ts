@@ -1,6 +1,4 @@
 import { DiceParser } from './dice-parser'
-import { diceVariableRef } from './dice-expression'
-import type { DiceExpression } from './dice-expression'
 import type { ParseError } from './parse-error'
 import {
   type Program,
@@ -40,17 +38,6 @@ import {
 export type ParseProgramResult =
   | { success: true; program: Program }
   | { success: false; errors: ParseError[] }
-
-// Errors that must surface to the caller even when thrown during a
-// speculative parse path (e.g. inside parseStatement's try/catch). These
-// represent real semantic issues, not "this isn't the production we
-// thought it was" backtracking signals.
-class FatalParseError extends Error {
-  constructor(message: string) {
-    super(message)
-    this.name = 'FatalParseError'
-  }
-}
 
 export const ProgramParser = {
   parse(input: string): ParseProgramResult {
@@ -154,8 +141,7 @@ class Parser {
         } else {
           this.pos = savedPos
         }
-      } catch (e) {
-        if (e instanceof FatalParseError) throw e
+      } catch {
         this.pos = savedPos
       }
     }
@@ -695,52 +681,15 @@ class Parser {
     const source = this.input.substring(start, this.pos)
     this.pos++ // skip closing backtick
 
-    // Reject variables in dice count or sides positions BEFORE substitution.
-    // Placeholder substitution would expand `$varD6` to e.g. `99990d6`, which
-    // the dice parser eagerly expands into 99990 separate dice -- causing
-    // freezes during analysis. True parametric dice support is a future
-    // feature; for now, give a clear error pointing at the right alternative.
-    const COUNT_POS = /\$([a-z_][a-z0-9_]*)\s*[Dd][\d{F$]/
-    const SIDES_POS = /\d\s*[Dd]\s*\$([a-z_][a-z0-9_]*)/
-    const countMatch = source.match(COUNT_POS)
-    if (countMatch !== null) {
-      throw new FatalParseError(
-        `Variable '$${countMatch[1]}' cannot be used in dice count position. ` +
-          `Use \`repeat $${countMatch[1]} { \`d...\` }\` to roll a variable number of dice.`,
-      )
-    }
-    const sidesMatch = source.match(SIDES_POS)
-    if (sidesMatch !== null) {
-      throw new FatalParseError(
-        `Variable '$${sidesMatch[1]}' cannot be used in dice sides position. ` +
-          `Variables in dice expressions can only appear in additive positions (e.g., \`d20 + $mod\`).`,
-      )
-    }
-
-    // Find all $name references
-    const varPattern = /\$([a-z_][a-z0-9_]*)/g
-    const vars: { name: string; placeholder: number }[] = []
-    let placeholderBase = 99990
-    let match: RegExpExecArray | null
-    while ((match = varPattern.exec(source)) !== null) {
-      vars.push({ name: match[1], placeholder: placeholderBase++ })
-    }
-
-    // Replace variables with placeholders
-    let substituted = source
-    for (const v of vars) {
-      substituted = substituted.replaceAll('$' + v.name, String(v.placeholder))
-    }
-
-    const parsed = DiceParser.parseOrNull(substituted)
+    // The dice parser natively recognises `$var` in additive, count, and
+    // sides positions (producing dice-variable-ref or n-dice nodes), so we
+    // can pass the source through unchanged.
+    const parsed = DiceParser.parseOrNull(source)
     if (parsed === null) {
       throw new Error(`Invalid dice expression: ${source}`)
     }
 
-    // Walk AST and replace placeholder literals with variable refs
-    const walked = vars.length > 0 ? walkDiceAst(parsed, vars) : parsed
-
-    return diceExpr(walked, source)
+    return diceExpr(parsed, source)
   }
 
   parseArrayExpr(): Expression {
@@ -1033,67 +982,6 @@ class Parser {
       )
     }
     this.pos++
-  }
-}
-
-function walkDiceAst(
-  expr: DiceExpression,
-  vars: { name: string; placeholder: number }[],
-): DiceExpression {
-  switch (expr.type) {
-    case 'literal': {
-      const found = vars.find((v) => v.placeholder === expr.value)
-      if (found) {
-        return diceVariableRef(found.name)
-      }
-      return expr
-    }
-    case 'binary-op':
-      return {
-        ...expr,
-        left: walkDiceAst(expr.left, vars),
-        right: walkDiceAst(expr.right, vars),
-      }
-    case 'unary-op':
-      return {
-        ...expr,
-        expr: walkDiceAst(expr.expr, vars),
-      }
-    case 'dice-reduce':
-      return {
-        ...expr,
-        reduceable: walkDiceReduceable(expr.reduceable, vars),
-      }
-    default:
-      return expr
-  }
-}
-
-function walkDiceReduceable(
-  reduceable: import('./dice-expression').DiceReduceable,
-  vars: { name: string; placeholder: number }[],
-): import('./dice-expression').DiceReduceable {
-  switch (reduceable.type) {
-    case 'dice-expressions':
-      return {
-        ...reduceable,
-        exprs: reduceable.exprs.map((e) => walkDiceAst(e, vars)),
-      }
-    case 'dice-list-with-filter': {
-      const list = reduceable.list
-      if (list.type === 'filterable-dice-expressions') {
-        return {
-          ...reduceable,
-          list: {
-            ...list,
-            exprs: list.exprs.map((e) => walkDiceAst(e, vars)),
-          },
-        }
-      }
-      return reduceable
-    }
-    case 'dice-list-with-map':
-      return reduceable
   }
 }
 

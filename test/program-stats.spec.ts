@@ -1598,11 +1598,9 @@ if $v == 1 then "a" else if $v == 2 then "b" else "other"
 })
 
 describe('program stats - parametric dice regression', () => {
-  test('regression: $rollsD6 does not hang', () => {
-    // Even though this rejects at parse time, ensure no analyzer can be triggered
+  test('regression: $rollsD6 parses without hanging', () => {
     const src = '$rolls = `d6`\n$roll = `$rollsD6`\n{ $roll }'
     const r = ProgramParser.parse(src)
-    expect(r.success).toBe(false)
-    // We don't run analyze because it can't be parsed - which is the fix
+    expect(r.success).toBe(true)
   })
 })

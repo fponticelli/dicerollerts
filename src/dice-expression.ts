@@ -101,6 +101,32 @@ export function diceVariableRef(name: string): DiceVariableRef {
   }
 }
 
+export type NDiceParam =
+  | { kind: 'literal'; value: number }
+  | { kind: 'variable'; name: string }
+
+export function nDiceLit(value: number): NDiceParam {
+  return { kind: 'literal', value }
+}
+
+export function nDiceVar(name: string): NDiceParam {
+  return { kind: 'variable', name }
+}
+
+export interface NDice {
+  type: 'n-dice'
+  count: NDiceParam
+  sides: NDiceParam
+}
+
+export function nDice(count: NDiceParam, sides: NDiceParam): NDice {
+  return {
+    type: 'n-dice',
+    count,
+    sides,
+  }
+}
+
 export type DiceExpression =
   | Die
   | Literal
@@ -109,6 +135,7 @@ export type DiceExpression =
   | UnaryOp
   | CustomDie
   | DiceVariableRef
+  | NDice
 
 export type SimpleReducer = 'sum' | 'min' | 'max' | 'average' | 'median'
 
