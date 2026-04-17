@@ -263,7 +263,7 @@ if (!parsed.success) {
 
 - Variables: `$name = expr` (immutable, `$[a-z_][a-z0-9_]*`)
 - Dice in backticks: `` `d20 + $mod` ``, `` `4d6 drop 1` ``, `` `8d10 count >= 6` ``
-- Parametric dice with uppercase `D`: `` `$numD$sides` ``
+- Variables in dice expressions: `$mod` in additive positions (e.g., `` `d20 + $mod` ``). Variables in dice count or sides positions are not supported (use `repeat` for variable counts).
 - Arithmetic: `+`, `-`, `*`, `/` (integer division)
 - Comparison: `==`, `!=`, `>`, `<`, `>=`, `<=`
 - Boolean: `and`, `or`, `not`

@@ -41,6 +41,17 @@ export type ParseProgramResult =
   | { success: true; program: Program }
   | { success: false; errors: ParseError[] }
 
+// Errors that must surface to the caller even when thrown during a
+// speculative parse path (e.g. inside parseStatement's try/catch). These
+// represent real semantic issues, not "this isn't the production we
+// thought it was" backtracking signals.
+class FatalParseError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'FatalParseError'
+  }
+}
+
 export const ProgramParser = {
   parse(input: string): ParseProgramResult {
     const parser = new Parser(input)
@@ -143,7 +154,8 @@ class Parser {
         } else {
           this.pos = savedPos
         }
-      } catch {
+      } catch (e) {
+        if (e instanceof FatalParseError) throw e
         this.pos = savedPos
       }
     }
@@ -682,6 +694,28 @@ class Parser {
     }
     const source = this.input.substring(start, this.pos)
     this.pos++ // skip closing backtick
+
+    // Reject variables in dice count or sides positions BEFORE substitution.
+    // Placeholder substitution would expand `$varD6` to e.g. `99990d6`, which
+    // the dice parser eagerly expands into 99990 separate dice -- causing
+    // freezes during analysis. True parametric dice support is a future
+    // feature; for now, give a clear error pointing at the right alternative.
+    const COUNT_POS = /\$([a-z_][a-z0-9_]*)\s*[Dd][\d{F$]/
+    const SIDES_POS = /\d\s*[Dd]\s*\$([a-z_][a-z0-9_]*)/
+    const countMatch = source.match(COUNT_POS)
+    if (countMatch !== null) {
+      throw new FatalParseError(
+        `Variable '$${countMatch[1]}' cannot be used in dice count position. ` +
+          `Use \`repeat $${countMatch[1]} { \`d...\` }\` to roll a variable number of dice.`,
+      )
+    }
+    const sidesMatch = source.match(SIDES_POS)
+    if (sidesMatch !== null) {
+      throw new FatalParseError(
+        `Variable '$${sidesMatch[1]}' cannot be used in dice sides position. ` +
+          `Variables in dice expressions can only appear in additive positions (e.g., \`d20 + $mod\`).`,
+      )
+    }
 
     // Find all $name references
     const varPattern = /\$([a-z_][a-z0-9_]*)/g

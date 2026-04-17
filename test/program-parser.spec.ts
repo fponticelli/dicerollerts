@@ -754,3 +754,44 @@ describe('match expression - value mode', () => {
     expect(r.success).toBe(true)
   })
 })
+
+describe('parametric dice rejection', () => {
+  test('rejects variable in dice count position', () => {
+    const r = ProgramParser.parse('$rolls = `d6`\n$roll = `$rollsD6`\n$roll')
+    expect(r.success).toBe(false)
+    if (!r.success) {
+      expect(r.errors[0].message).toMatch(/dice count position/i)
+    }
+  })
+
+  test('rejects variable in dice sides position', () => {
+    const r = ProgramParser.parse('$sides = `d20`\n$roll = `1d$sides`\n$roll')
+    expect(r.success).toBe(false)
+    if (!r.success) {
+      expect(r.errors[0].message).toMatch(/dice sides position/i)
+    }
+  })
+
+  test('rejects nested $var$D$var', () => {
+    const r = ProgramParser.parse('$n = 3\n$s = 6\n$roll = `$nD$s`\n$roll')
+    expect(r.success).toBe(false)
+  })
+
+  test('still allows variable in additive position', () => {
+    const r = ProgramParser.parse('$mod = 5\n$roll = `d20 + $mod`\n$roll')
+    expect(r.success).toBe(true)
+  })
+
+  test('still allows variable in subtractive position', () => {
+    const r = ProgramParser.parse('$mod = 2\n$roll = `d20 - $mod`\n$roll')
+    expect(r.success).toBe(true)
+  })
+
+  test('regression: original freeze case', () => {
+    // The exact program that caused the freeze
+    const src = '$rolls = `d6`\n$roll = `$rollsD6`\n{ $roll }'
+    const r = ProgramParser.parse(src)
+    // It must not freeze; either parses (now rejects) or returns immediately
+    expect(r.success).toBe(false)
+  })
+})
