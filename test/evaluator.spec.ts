@@ -244,3 +244,122 @@ $damage = if $hit then \`2d6 + $str_mod\` else 0
     expect(result.damage).toBeGreaterThan(0)
   })
 })
+
+describe('evaluator - match expression', () => {
+  test('guard mode picks first true', () => {
+    expect(run('match { false -> 1, true -> 2, _ -> 3 }')).toBe(2)
+  })
+
+  test('guard mode falls through to wildcard', () => {
+    expect(run('match { false -> 1, false -> 2, _ -> 3 }')).toBe(3)
+  })
+
+  test('value mode picks matching pattern', () => {
+    expect(run('match 2 { 1 -> "a", 2 -> "b", _ -> "c" }')).toBe('b')
+  })
+
+  test('value mode falls through to wildcard', () => {
+    expect(run('match 5 { 1 -> "a", 2 -> "b", _ -> "c" }')).toBe('c')
+  })
+
+  test('value mode with guard fires when guard true', () => {
+    const result = run(`
+$crit = true
+match "sword" {
+  "sword" if $crit -> "crit hit"
+  "sword" -> "normal hit"
+  _ -> "miss"
+}
+`)
+    expect(result).toBe('crit hit')
+  })
+
+  test('value mode with guard skips when guard false', () => {
+    const result = run(`
+$crit = false
+match "sword" {
+  "sword" if $crit -> "crit hit"
+  "sword" -> "normal hit"
+  _ -> "miss"
+}
+`)
+    expect(result).toBe('normal hit')
+  })
+
+  test('wildcard with guard', () => {
+    expect(
+      run(`
+$x = 15
+match $x {
+  20 -> "twenty"
+  _ if $x > 10 -> "big"
+  _ -> "small"
+}
+`),
+    ).toBe('big')
+  })
+
+  test('no matching arm throws', () => {
+    expect(() => run('match 5 { 1 -> "a" }')).toThrow()
+  })
+
+  test('match in assignment', () => {
+    const result = run(`
+$x = 3
+$y = match $x {
+  1 -> 10
+  2 -> 20
+  3 -> 30
+  _ -> 0
+}
+$y
+`)
+    expect(result).toBe(30)
+  })
+
+  test('variable as pattern', () => {
+    const result = run(`
+$y = 5
+match 5 {
+  $y -> "matched y"
+  _ -> "no"
+}
+`)
+    expect(result).toBe('matched y')
+  })
+
+  test('computed pattern', () => {
+    const result = run(`
+$base = 4
+match 5 {
+  $base + 1 -> "yes"
+  _ -> "no"
+}
+`)
+    expect(result).toBe('yes')
+  })
+
+  test('guard mode with redundant if guard', () => {
+    const result = run(`
+$flag = true
+match {
+  $flag if false -> "no"
+  $flag -> "yes"
+  _ -> "fallback"
+}
+`)
+    expect(result).toBe('yes')
+  })
+
+  test('boolean equality in value mode', () => {
+    expect(run('match true { false -> 0, true -> 1, _ -> 2 }')).toBe(1)
+  })
+
+  test('string match', () => {
+    expect(
+      run(
+        'match "advantage" { "advantage" -> 1, "disadvantage" -> 2, _ -> 0 }',
+      ),
+    ).toBe(1)
+  })
+})

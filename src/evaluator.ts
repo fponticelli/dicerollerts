@@ -3,6 +3,7 @@ import type {
   Program,
   Statement,
   Expression,
+  MatchArm,
   Value,
   ParameterSpec,
 } from './program'
@@ -265,7 +266,49 @@ export class Evaluator {
         }
         return arr[idx]
       }
+
+      case 'match-expr': {
+        const matched =
+          expr.value !== undefined ? this.evalExpr(expr.value, env) : undefined
+
+        for (const arm of expr.arms) {
+          if (this.armFires(arm, matched, env)) {
+            return this.evalExpr(arm.body, env)
+          }
+        }
+
+        throw new Error('No match arm fired')
+      }
     }
+  }
+
+  private armFires(
+    arm: MatchArm,
+    matched: Value | undefined,
+    env: Environment,
+  ): boolean {
+    let patternMatches: boolean
+    if (arm.pattern.kind === 'wildcard') {
+      patternMatches = true
+    } else {
+      const patternValue = this.evalExpr(arm.pattern.expr, env)
+      if (matched === undefined) {
+        // guard mode: pattern is a boolean condition
+        patternMatches = this.isTruthy(patternValue)
+      } else {
+        // value mode: equality check (same semantics as `==`)
+        patternMatches = matched === patternValue
+      }
+    }
+
+    if (!patternMatches) return false
+
+    if (arm.guard !== undefined) {
+      const guardValue = this.evalExpr(arm.guard, env)
+      if (!this.isTruthy(guardValue)) return false
+    }
+
+    return true
   }
 
   private toNumber(val: Value): number {
