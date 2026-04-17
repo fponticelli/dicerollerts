@@ -598,3 +598,72 @@ describe('histogram utilities', () => {
     expect(binned.get(2)).toBe(0.5)
   })
 })
+
+describe('program-stats - parameters', () => {
+  test('parameter with literal default is constant in classification', () => {
+    const prog = parseProgram('$x is { default: 5 }\n$x + 3')
+    expect(ProgramStats.classify(prog)).toBe('constant')
+  })
+
+  test('parameter with dice expression default is exact', () => {
+    const prog = parseProgram('$x is { default: `d6` }\n$x')
+    expect(ProgramStats.classify(prog)).toBe('exact')
+  })
+
+  test('override makes dice expression default constant', () => {
+    const prog = parseProgram('$x is { default: `d6` }\n$x')
+    const result = ProgramStats.analyze(prog, { parameters: { x: 4 } })
+    expect(result.strategy.tier).toBe('constant')
+    if (result.stats.type === 'number') {
+      expect(result.stats.mean).toBe(4)
+    }
+  })
+
+  test('analyze with parameter override shifts distribution', () => {
+    const prog = parseProgram('$mod is { default: 0 }\n`d6` + $mod')
+    const r1 = ProgramStats.analyze(prog)
+    const r2 = ProgramStats.analyze(prog, { parameters: { mod: 5 } })
+    if (r1.stats.type === 'number' && r2.stats.type === 'number') {
+      expect(r2.stats.mean - r1.stats.mean).toBeCloseTo(5)
+    }
+  })
+
+  test('analyze with literal default produces constant tier', () => {
+    const prog = parseProgram('$x is { default: 5 }\n$x + 3')
+    const result = ProgramStats.analyze(prog)
+    expect(result.strategy.tier).toBe('constant')
+    if (result.stats.type === 'number') {
+      expect(result.stats.mean).toBe(8)
+    }
+  })
+
+  test('analyze with dice default produces exact tier', () => {
+    const prog = parseProgram('$x is { default: `d6` }\n$x')
+    const result = ProgramStats.analyze(prog)
+    expect(result.strategy.tier).toBe('exact')
+    if (result.stats.type === 'number') {
+      expect(result.stats.mean).toBeCloseTo(3.5, 5)
+      expect(result.stats.min).toBe(1)
+      expect(result.stats.max).toBe(6)
+    }
+  })
+
+  test('analyze rejects unknown parameter override', () => {
+    const prog = parseProgram('$x is { default: 5 }\n$x')
+    expect(() =>
+      ProgramStats.analyze(prog, { parameters: { y: 10 } }),
+    ).toThrow()
+  })
+
+  test('boolean parameter override', () => {
+    const prog = parseProgram(
+      '$adv is { default: false }\nif $adv then 10 else 5',
+    )
+    const r1 = ProgramStats.analyze(prog)
+    const r2 = ProgramStats.analyze(prog, { parameters: { adv: true } })
+    if (r1.stats.type === 'number' && r2.stats.type === 'number') {
+      expect(r1.stats.mean).toBe(5)
+      expect(r2.stats.mean).toBe(10)
+    }
+  })
+})

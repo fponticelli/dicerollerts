@@ -10,6 +10,18 @@ function run(input: string, rollFn?: (max: number) => number): Value {
   return evaluator.run(result.program)
 }
 
+function runWithParams(
+  input: string,
+  params: Record<string, Value>,
+  rollFn?: (max: number) => number,
+): Value {
+  const result = ProgramParser.parse(input)
+  if (!result.success)
+    throw new Error('Parse failed: ' + result.errors[0].message)
+  const evaluator = new Evaluator(rollFn ?? ((max) => max))
+  return evaluator.run(result.program, { parameters: params })
+}
+
 describe('evaluator - literals', () => {
   test('number', () => expect(run('42')).toBe(42))
   test('boolean', () => expect(run('true')).toBe(true))
@@ -134,6 +146,84 @@ describe('evaluator - repeat limits', () => {
     if (!result.success) throw new Error('Parse failed')
     const evaluator = new Evaluator(() => 1, { maxRepeatIterations: 3 })
     expect(() => evaluator.run(result.program)).toThrow()
+  })
+})
+
+describe('evaluator - parameters', () => {
+  test('uses default when no override', () => {
+    const result = run('$x is { default: 5 }\n$x + 3')
+    expect(result).toBe(8)
+  })
+
+  test('override replaces default', () => {
+    const result = runWithParams('$x is { default: 5 }\n$x + 3', { x: 10 })
+    expect(result).toBe(13)
+  })
+
+  test('dice expression default rolls', () => {
+    const result = run('$x is { default: `d6` }\n$x', () => 4)
+    expect(result).toBe(4)
+  })
+
+  test('dice expression override is constant', () => {
+    const result = runWithParams('$x is { default: `d6` }\n$x', { x: 99 })
+    expect(result).toBe(99)
+  })
+
+  test('unknown parameter throws', () => {
+    expect(() => runWithParams('$x is { default: 5 }\n$x', { y: 7 })).toThrow()
+  })
+
+  test('type mismatch throws', () => {
+    expect(() =>
+      runWithParams('$x is { default: 5 }\n$x', { x: 'wrong' }),
+    ).toThrow()
+  })
+
+  test('out of range throws', () => {
+    expect(() =>
+      runWithParams('$x is { default: 5, min: 0, max: 10 }\n$x', { x: 20 }),
+    ).toThrow()
+  })
+
+  test('not in enum throws', () => {
+    expect(() =>
+      runWithParams('$x is { default: "a", enum: ["a", "b"] }\n$x', { x: 'z' }),
+    ).toThrow()
+  })
+
+  test('boolean parameter', () => {
+    const result = runWithParams(
+      '$x is { default: false }\nif $x then 1 else 0',
+      { x: true },
+    )
+    expect(result).toBe(1)
+  })
+
+  test('string parameter', () => {
+    const result = runWithParams(
+      '$x is { default: "a", enum: ["a", "b", "c"] }\n$x',
+      { x: 'b' },
+    )
+    expect(result).toBe('b')
+  })
+
+  test('parameter used in dice expression', () => {
+    const result = run('$mod is { default: 3 }\n`d6 + $mod`', () => 4)
+    expect(result).toBe(7)
+  })
+
+  test('parameter override used in dice expression', () => {
+    const result = runWithParams(
+      '$mod is { default: 0 }\n`d6 + $mod`',
+      { mod: 5 },
+      () => 4,
+    )
+    expect(result).toBe(9)
+  })
+
+  test('reassigning parameter via assignment throws', () => {
+    expect(() => run('$x is { default: 5 }\n$x = 10')).toThrow()
   })
 })
 

@@ -9,7 +9,7 @@ export function program(statements: Statement[]): Program {
   return { type: 'program', statements }
 }
 
-export type Statement = Assignment | ExpressionStatement
+export type Statement = Assignment | ExpressionStatement | ParameterDeclaration
 
 export interface Assignment {
   type: 'assignment'
@@ -28,6 +28,32 @@ export interface ExpressionStatement {
 
 export function expressionStatement(expr: Expression): ExpressionStatement {
   return { type: 'expression-statement', expr }
+}
+
+export interface ParameterDeclaration {
+  type: 'parameter-declaration'
+  name: string
+  spec: ParameterSpec
+}
+
+export interface ParameterSpec {
+  default: ParameterDefault
+  label?: string
+  description?: string
+  min?: number
+  max?: number
+  enum?: Value[]
+}
+
+export type ParameterDefault =
+  | { kind: 'value'; value: Value }
+  | { kind: 'dice'; expr: DiceExpression; source: string }
+
+export function parameterDeclaration(
+  name: string,
+  spec: ParameterSpec,
+): ParameterDeclaration {
+  return { type: 'parameter-declaration', name, spec }
 }
 
 export type Expression =

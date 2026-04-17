@@ -5,6 +5,7 @@ import type {
   Expression,
   Value,
   BinaryOper,
+  ParameterSpec,
 } from './program'
 import { Evaluator } from './evaluator'
 import { DiceStats } from './dice-stats'
@@ -107,6 +108,9 @@ export interface AnalyzeOptions {
   // Optional cancellation. The Monte Carlo loop checks `signal.aborted`
   // between batches; if set, it throws `DOMException('Aborted', 'AbortError')`.
   signal?: AbortSignal
+  // Parameter overrides — when provided, parameters are bound to the given
+  // values for the entire analysis (treated as constants).
+  parameters?: Record<string, Value>
 }
 
 export interface AnalyzeAsyncOptions extends AnalyzeOptions {
@@ -136,19 +140,23 @@ const DEFAULT_TARGET_BIN_STDERR = 0.005
 const MAX_JOINT_SIZE = 100000
 
 export const ProgramStats = {
-  classify(program: Program): Tier {
-    return classifyProgram(program)
+  classify(
+    program: Program,
+    options?: { parameters?: Record<string, Value> },
+  ): Tier {
+    return classifyProgram(program, options?.parameters)
   },
 
   analyze(program: Program, options?: AnalyzeOptions): AnalyzeResult {
+    validateProgramParameters(program, options?.parameters)
     const t0 = perfNow()
-    const analysis = analyzeProgram(program)
+    const analysis = analyzeProgram(program, options?.parameters)
     const classifyTimeMs = perfNow() - t0
 
     if (!analysis.random) {
       const t1 = perfNow()
       const evaluator = makeEvaluator()
-      const value = evaluator.run(program)
+      const value = evaluator.run(program, { parameters: options?.parameters })
       const analyzeTimeMs = perfNow() - t1
       return {
         stats: constantStats(value),
@@ -196,11 +204,12 @@ export const ProgramStats = {
     options?: AnalyzeAsyncOptions,
   ): AsyncGenerator<AsyncProgress> {
     throwIfAborted(options?.signal)
-    const analysis = analyzeProgram(program)
+    validateProgramParameters(program, options?.parameters)
+    const analysis = analyzeProgram(program, options?.parameters)
 
     if (!analysis.random) {
       const evaluator = makeEvaluator()
-      const value = evaluator.run(program)
+      const value = evaluator.run(program, { parameters: options?.parameters })
       yield {
         stats: constantStats(value),
         trials: 0,
@@ -220,6 +229,22 @@ export const ProgramStats = {
 
     yield* runMonteCarloAsync(program, options)
   },
+}
+
+function validateProgramParameters(
+  program: Program,
+  parameters: Record<string, Value> | undefined,
+): void {
+  if (!parameters) return
+  const declared = new Set<string>()
+  for (const stmt of program.statements) {
+    if (stmt.type === 'parameter-declaration') declared.add(stmt.name)
+  }
+  for (const name of Object.keys(parameters)) {
+    if (!declared.has(name)) {
+      throw new Error(`Unknown parameter: $${name}`)
+    }
+  }
 }
 
 function throwIfAborted(signal: AbortSignal | undefined): void {
@@ -684,6 +709,17 @@ function countVariableUses(program: Program): Map<string, number> {
     if (stmt.type === 'assignment') {
       visitExpr(stmt.value)
       declared.add(stmt.name)
+    } else if (stmt.type === 'parameter-declaration') {
+      // Dice expression defaults can reference variables, but per spec
+      // defaults are constants only and don't depend on other variables.
+      // We still walk the dice expression to count any var refs (would be
+      // a runtime error, but we keep the analysis simple).
+      if (stmt.spec.default.kind === 'dice') {
+        countDiceVarRefs(stmt.spec.default.expr, (name) => {
+          if (declared.has(name)) inc(name)
+        })
+      }
+      declared.add(stmt.name)
     } else {
       visitExpr(stmt.expr)
     }
@@ -772,8 +808,11 @@ function freshSourceId(env: AnalysisEnv): string {
   return 'r' + env.nextSourceId.value++
 }
 
-function classifyProgram(program: Program): Tier {
-  const analysis = analyzeProgram(program)
+function classifyProgram(
+  program: Program,
+  parameters?: Record<string, Value>,
+): Tier {
+  const analysis = analyzeProgram(program, parameters)
   if (!analysis.random) return 'constant'
   if (analysis.exactDist !== null) {
     return 'exact'
@@ -781,9 +820,13 @@ function classifyProgram(program: Program): Tier {
   return 'monte-carlo'
 }
 
-function analyzeProgram(program: Program): ExprAnalysis {
+function analyzeProgram(
+  program: Program,
+  parameters?: Record<string, Value>,
+): ExprAnalysis {
   const useCounts = countVariableUses(program)
   const env = makeAnalysisEnv(useCounts)
+  const overrides = parameters ?? {}
   let last: ExprAnalysis = nonRandomAnalysis()
 
   for (const stmt of program.statements) {
@@ -798,12 +841,86 @@ function analyzeProgram(program: Program): ExprAnalysis {
         env.symBindings.set(stmt.name, null)
       }
       last = a
+    } else if (stmt.type === 'parameter-declaration') {
+      const a = analyzeParameterDeclaration(
+        stmt.name,
+        stmt.spec,
+        overrides,
+        env,
+      )
+      env.bindings.set(stmt.name, a)
+      if (a.symDist !== null) {
+        env.symBindings.set(stmt.name, a.symDist())
+      } else {
+        env.symBindings.set(stmt.name, null)
+      }
+      last = a
     } else {
       last = analyzeExpr(stmt.expr, env)
     }
   }
 
   return last
+}
+
+function analyzeParameterDeclaration(
+  name: string,
+  spec: ParameterSpec,
+  overrides: Record<string, Value>,
+  env: AnalysisEnv,
+): ExprAnalysis {
+  // If overridden, treat as constant.
+  if (Object.prototype.hasOwnProperty.call(overrides, name)) {
+    return constantValueAnalysis(overrides[name])
+  }
+  // Literal default → constant.
+  if (spec.default.kind === 'value') {
+    return constantValueAnalysis(spec.default.value)
+  }
+  // Dice expression default → analyze like a fresh dice-expr.
+  const exprCopy = spec.default.expr
+  const sourceId = freshSourceId(env)
+  let cached: SymDist<SymValue> | null | undefined = undefined
+  const sym: () => SymDist<SymValue> | null = () => {
+    if (cached !== undefined) return cached
+    try {
+      const dist = DiceStats.distribution(exprCopy)
+      cached = fromDiceDistribution(sourceId, dist)
+    } catch {
+      cached = null
+    }
+    return cached
+  }
+  return {
+    random: true,
+    randomVarsUsed: new Set(),
+    exactDist: () => {
+      const sd = sym()
+      if (sd === null) return null
+      return symDistToFieldStats(sd)
+    },
+    symDist: sym,
+  }
+}
+
+function constantValueAnalysis(value: Value): ExprAnalysis {
+  if (typeof value === 'number') {
+    return symDistAnalysis(() => constSymDist<number>(value), false, new Set())
+  }
+  if (typeof value === 'boolean') {
+    return symDistAnalysis(() => constSymDist<boolean>(value), false, new Set())
+  }
+  if (typeof value === 'string') {
+    return symDistAnalysis(() => constSymDist<string>(value), false, new Set())
+  }
+  // Arrays and records as parameter values aren't currently produced by the
+  // parser, but treat them as opaque non-random values.
+  return {
+    random: false,
+    randomVarsUsed: new Set(),
+    exactDist: () => constantStats(value),
+    symDist: null,
+  }
 }
 
 function nonRandomAnalysis(): ExprAnalysis {
@@ -1150,6 +1267,22 @@ function analyzeExpr(expr: Expression, env: AnalysisEnv): ExprAnalysis {
       for (const stmt of expr.body) {
         if (stmt.type === 'assignment') {
           const a = analyzeExpr(stmt.value, childEnv)
+          childEnv.bindings.set(stmt.name, a)
+          if (a.symDist !== null) {
+            childEnv.symBindings.set(stmt.name, a.symDist())
+          } else {
+            childEnv.symBindings.set(stmt.name, null)
+          }
+          bodyLast = a
+        } else if (stmt.type === 'parameter-declaration') {
+          // Parameter declarations inside repeat bodies have no overrides
+          // accessible; analyze their defaults.
+          const a = analyzeParameterDeclaration(
+            stmt.name,
+            stmt.spec,
+            {},
+            childEnv,
+          )
           childEnv.bindings.set(stmt.name, a)
           if (a.symDist !== null) {
             childEnv.symBindings.set(stmt.name, a.symDist())
@@ -1807,6 +1940,7 @@ interface MonteCarloPlan {
   yieldEvery: number
   config: ConvergenceConfig
   signal: AbortSignal | undefined
+  parameters: Record<string, Value> | undefined
 }
 
 function planMonteCarlo(
@@ -1835,6 +1969,7 @@ function planMonteCarlo(
     yieldEvery,
     config: { targetRelativeError, targetBinStderr, minTrials },
     signal: options?.signal,
+    parameters: options?.parameters,
   }
 }
 
@@ -1851,9 +1986,11 @@ function runMonteCarlo(
   let converged = false
   const evaluator = makeEvaluator()
 
+  const runOpts = plan.parameters ? { parameters: plan.parameters } : undefined
+
   if (plan.fixedTrials !== null) {
     for (let i = 0; i < plan.fixedTrials; i++) {
-      results.push(evaluator.run(program))
+      results.push(evaluator.run(program, runOpts))
       total++
       if (total % plan.batchSize === 0) {
         throwIfAborted(plan.signal)
@@ -1873,7 +2010,7 @@ function runMonteCarlo(
   while (total < plan.minTrials) {
     const target = Math.min(total + plan.batchSize, plan.minTrials)
     while (total < target) {
-      results.push(evaluator.run(program))
+      results.push(evaluator.run(program, runOpts))
       total++
     }
     throwIfAborted(plan.signal)
@@ -1886,7 +2023,7 @@ function runMonteCarlo(
     }
     const target = Math.min(total + plan.batchSize, plan.maxTrials)
     while (total < target) {
-      results.push(evaluator.run(program))
+      results.push(evaluator.run(program, runOpts))
       total++
     }
     throwIfAborted(plan.signal)
@@ -1918,10 +2055,12 @@ async function* runMonteCarloAsync(
   let total = 0
   const evaluator = makeEvaluator()
 
+  const runOpts = plan.parameters ? { parameters: plan.parameters } : undefined
+
   if (plan.fixedTrials !== null) {
     let nextYield = plan.yieldEvery
     for (let i = 0; i < plan.fixedTrials; i++) {
-      results.push(evaluator.run(program))
+      results.push(evaluator.run(program, runOpts))
       total++
       if (total >= nextYield || total === plan.fixedTrials) {
         throwIfAborted(plan.signal)
@@ -1938,7 +2077,7 @@ async function* runMonteCarloAsync(
   while (total < plan.maxTrials) {
     const target = Math.min(total + plan.batchSize, plan.maxTrials)
     while (total < target) {
-      results.push(evaluator.run(program))
+      results.push(evaluator.run(program, runOpts))
       total++
     }
 

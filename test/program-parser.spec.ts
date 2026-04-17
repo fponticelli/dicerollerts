@@ -396,3 +396,184 @@ $damage = if $hit then \`2d6 + $str_mod\` else 0
     expect(result.success).toBe(false)
   })
 })
+
+describe('parameter declarations', () => {
+  test('basic number parameter', () => {
+    const r = ProgramParser.parse('$x is { default: 5 }')
+    expect(r.success).toBe(true)
+    if (r.success) {
+      const stmt = r.program.statements[0]
+      expect(stmt.type).toBe('parameter-declaration')
+      if (stmt.type === 'parameter-declaration') {
+        expect(stmt.name).toBe('x')
+        expect(stmt.spec.default).toEqual({ kind: 'value', value: 5 })
+      }
+    }
+  })
+
+  test('full parameter with metadata', () => {
+    const r = ProgramParser.parse(
+      '$x is { default: 5, min: 0, max: 10, label: "X", description: "..." }',
+    )
+    expect(r.success).toBe(true)
+    if (r.success) {
+      const stmt = r.program.statements[0]
+      if (stmt.type === 'parameter-declaration') {
+        expect(stmt.spec.min).toBe(0)
+        expect(stmt.spec.max).toBe(10)
+        expect(stmt.spec.label).toBe('X')
+        expect(stmt.spec.description).toBe('...')
+      }
+    }
+  })
+
+  test('boolean default', () => {
+    const r = ProgramParser.parse('$x is { default: true }')
+    expect(r.success).toBe(true)
+    if (r.success) {
+      const stmt = r.program.statements[0]
+      if (stmt.type === 'parameter-declaration') {
+        expect(stmt.spec.default).toEqual({ kind: 'value', value: true })
+      }
+    }
+  })
+
+  test('false boolean default', () => {
+    const r = ProgramParser.parse('$x is { default: false }')
+    expect(r.success).toBe(true)
+  })
+
+  test('negative number default', () => {
+    const r = ProgramParser.parse('$x is { default: -3 }')
+    expect(r.success).toBe(true)
+    if (r.success) {
+      const stmt = r.program.statements[0]
+      if (stmt.type === 'parameter-declaration') {
+        expect(stmt.spec.default).toEqual({ kind: 'value', value: -3 })
+      }
+    }
+  })
+
+  test('string default with enum', () => {
+    const r = ProgramParser.parse(
+      '$x is { default: "a", enum: ["a", "b", "c"] }',
+    )
+    expect(r.success).toBe(true)
+    if (r.success) {
+      const stmt = r.program.statements[0]
+      if (stmt.type === 'parameter-declaration') {
+        expect(stmt.spec.enum).toEqual(['a', 'b', 'c'])
+      }
+    }
+  })
+
+  test('dice expression default', () => {
+    const r = ProgramParser.parse('$x is { default: `d6` }')
+    expect(r.success).toBe(true)
+    if (r.success) {
+      const stmt = r.program.statements[0]
+      if (stmt.type === 'parameter-declaration') {
+        expect(stmt.spec.default.kind).toBe('dice')
+        if (stmt.spec.default.kind === 'dice') {
+          expect(stmt.spec.default.source).toBe('d6')
+        }
+      }
+    }
+  })
+
+  test('trailing comma allowed', () => {
+    const r = ProgramParser.parse('$x is { default: 5, }')
+    expect(r.success).toBe(true)
+  })
+
+  test('multiline parameter declaration', () => {
+    const r = ProgramParser.parse(
+      `$x is {
+  default: 5,
+  min: 0,
+  max: 10,
+}`,
+    )
+    expect(r.success).toBe(true)
+  })
+
+  test('rejects missing default', () => {
+    const r = ProgramParser.parse('$x is { label: "X" }')
+    expect(r.success).toBe(false)
+  })
+
+  test('rejects unknown field', () => {
+    const r = ProgramParser.parse('$x is { default: 5, foo: "bar" }')
+    expect(r.success).toBe(false)
+  })
+
+  test('rejects min on string default', () => {
+    const r = ProgramParser.parse('$x is { default: "a", min: 0 }')
+    expect(r.success).toBe(false)
+  })
+
+  test('rejects min on boolean default', () => {
+    const r = ProgramParser.parse('$x is { default: true, min: 0 }')
+    expect(r.success).toBe(false)
+  })
+
+  test('rejects enum on number', () => {
+    const r = ProgramParser.parse('$x is { default: 5, enum: [1, 2, 3] }')
+    expect(r.success).toBe(false)
+  })
+
+  test('rejects default not in enum', () => {
+    const r = ProgramParser.parse('$x is { default: "z", enum: ["a", "b"] }')
+    expect(r.success).toBe(false)
+  })
+
+  test('rejects default out of range (above max)', () => {
+    const r = ProgramParser.parse('$x is { default: 50, min: 0, max: 10 }')
+    expect(r.success).toBe(false)
+  })
+
+  test('rejects default out of range (below min)', () => {
+    const r = ProgramParser.parse('$x is { default: -5, min: 0, max: 10 }')
+    expect(r.success).toBe(false)
+  })
+
+  test('rejects min > max', () => {
+    const r = ProgramParser.parse('$x is { default: 5, min: 10, max: 0 }')
+    expect(r.success).toBe(false)
+  })
+
+  test('rejects label not a string', () => {
+    const r = ProgramParser.parse('$x is { default: 5, label: 42 }')
+    expect(r.success).toBe(false)
+  })
+
+  test('rejects description not a string', () => {
+    const r = ProgramParser.parse('$x is { default: 5, description: 42 }')
+    expect(r.success).toBe(false)
+  })
+
+  test('rejects enum mixed types', () => {
+    const r = ProgramParser.parse(
+      '$x is { default: "a", enum: ["a", 5, true] }',
+    )
+    expect(r.success).toBe(false)
+  })
+
+  test('parameter then expression', () => {
+    const r = ProgramParser.parse('$x is { default: 5 }\n$x + 3')
+    expect(r.success).toBe(true)
+    if (r.success) {
+      expect(r.program.statements).toHaveLength(2)
+    }
+  })
+
+  test('is is reserved as record key', () => {
+    const r = ProgramParser.parse('{ is: 1 }')
+    expect(r.success).toBe(false)
+  })
+
+  test('dice expression default with arithmetic', () => {
+    const r = ProgramParser.parse('$x is { default: `2d6 + 1` }')
+    expect(r.success).toBe(true)
+  })
+})

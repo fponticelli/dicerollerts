@@ -1,5 +1,11 @@
 import type { Roll } from './dice-expression'
-import type { Program, Statement, Expression, Value } from './program'
+import type {
+  Program,
+  Statement,
+  Expression,
+  Value,
+  ParameterSpec,
+} from './program'
 import { Roller } from './roller'
 import { RR } from './roll-result-domain'
 
@@ -41,6 +47,10 @@ export interface EvaluatorOptions {
   maxRepeatIterations?: number
 }
 
+export interface RunOptions {
+  parameters?: Record<string, Value>
+}
+
 export class Evaluator {
   private readonly rollFn: Roll
   private readonly maxRepeat: number
@@ -50,16 +60,37 @@ export class Evaluator {
     this.maxRepeat = options?.maxRepeatIterations ?? 10000
   }
 
-  run(prog: Program): Value {
+  run(prog: Program, options?: RunOptions): Value {
     const env = new Environment()
+    const overrides = options?.parameters ?? {}
+
+    // Collect parameter declarations to validate overrides up-front.
+    const declaredParams = new Map<string, ParameterSpec>()
+    for (const stmt of prog.statements) {
+      if (stmt.type === 'parameter-declaration') {
+        declaredParams.set(stmt.name, stmt.spec)
+      }
+    }
+    for (const name of Object.keys(overrides)) {
+      const spec = declaredParams.get(name)
+      if (spec === undefined) {
+        throw new Error(`Unknown parameter: $${name}`)
+      }
+      validateParameterOverride(name, overrides[name], spec)
+    }
+
     let result: Value = 0
     for (const stmt of prog.statements) {
-      result = this.execStatement(stmt, env)
+      result = this.execStatement(stmt, env, overrides)
     }
     return result
   }
 
-  private execStatement(stmt: Statement, env: Environment): Value {
+  private execStatement(
+    stmt: Statement,
+    env: Environment,
+    parameters: Record<string, Value> = {},
+  ): Value {
     switch (stmt.type) {
       case 'assignment': {
         if (env.has(stmt.name)) {
@@ -71,6 +102,28 @@ export class Evaluator {
       }
       case 'expression-statement':
         return this.evalExpr(stmt.expr, env)
+      case 'parameter-declaration': {
+        if (env.has(stmt.name)) {
+          throw new Error(`Cannot reassign immutable variable: $${stmt.name}`)
+        }
+        let value: Value
+        if (Object.prototype.hasOwnProperty.call(parameters, stmt.name)) {
+          value = parameters[stmt.name]
+        } else if (stmt.spec.default.kind === 'value') {
+          value = stmt.spec.default.value
+        } else {
+          // Dice-expression default - roll using current environment.
+          const vars: Record<string, number> = {}
+          for (const [name, val] of env.entries()) {
+            if (typeof val === 'number') vars[name] = val
+            else if (typeof val === 'boolean') vars[name] = val ? 1 : 0
+          }
+          const roller = new Roller(this.rollFn, undefined, vars)
+          value = RR.getResult(roller.roll(stmt.spec.default.expr))
+        }
+        env.set(stmt.name, value)
+        return value
+      }
     }
   }
 
@@ -227,4 +280,59 @@ export class Evaluator {
     if (typeof val === 'string') return val.length > 0
     return true
   }
+}
+
+function validateParameterOverride(
+  name: string,
+  value: Value,
+  spec: ParameterSpec,
+): void {
+  // Determine expected type from default kind.
+  let expectedType: 'number' | 'boolean' | 'string'
+  if (spec.default.kind === 'dice') {
+    expectedType = 'number'
+  } else {
+    const dv = spec.default.value
+    if (typeof dv === 'number') expectedType = 'number'
+    else if (typeof dv === 'boolean') expectedType = 'boolean'
+    else if (typeof dv === 'string') expectedType = 'string'
+    else {
+      throw new Error(`Parameter $${name} has unsupported default type`)
+    }
+  }
+
+  const actualType = typeof value
+  if (actualType !== expectedType) {
+    throw new Error(
+      `Type mismatch for parameter $${name}: expected ${expectedType}, got ${actualType}`,
+    )
+  }
+
+  if (expectedType === 'number') {
+    const v = value as number
+    if (spec.min !== undefined && v < spec.min) {
+      throw new Error(
+        `Parameter $${name} out of range: ${v} not in [${spec.min}, ${spec.max ?? ''}]`,
+      )
+    }
+    if (spec.max !== undefined && v > spec.max) {
+      throw new Error(
+        `Parameter $${name} out of range: ${v} not in [${spec.min ?? ''}, ${spec.max}]`,
+      )
+    }
+  }
+
+  if (spec.enum !== undefined) {
+    const found = spec.enum.some((e) => e === value)
+    if (!found) {
+      throw new Error(
+        `Parameter $${name} not in allowed values: ${formatRuntimeValue(value)} not in [${spec.enum.map(formatRuntimeValue).join(', ')}]`,
+      )
+    }
+  }
+}
+
+function formatRuntimeValue(v: Value): string {
+  if (typeof v === 'string') return JSON.stringify(v)
+  return String(v)
 }

@@ -155,6 +155,9 @@ export type {
   IndexAccess,
   Value,
   RuntimeError,
+  ParameterDeclaration,
+  ParameterSpec,
+  ParameterDefault,
 } from './program'
 
 export {
@@ -175,9 +178,11 @@ export {
   fieldAccess,
   indexAccess,
   runtimeError,
+  parameterDeclaration,
 } from './program'
 
-export { Evaluator } from './evaluator'
+export { Evaluator, type RunOptions } from './evaluator'
+export { ProgramParameters, type Parameter } from './program-parameters'
 export {
   ProgramStats,
   suggestBucketSize,

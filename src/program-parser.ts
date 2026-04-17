@@ -7,6 +7,10 @@ import {
   type Statement,
   type Expression,
   type BinaryOper,
+  type ParameterDeclaration,
+  type ParameterSpec,
+  type ParameterDefault,
+  type Value,
   program,
   assignment,
   expressionStatement,
@@ -23,6 +27,7 @@ import {
   repeatExpr,
   fieldAccess,
   indexAccess,
+  parameterDeclaration,
 } from './program'
 
 export type ParseProgramResult =
@@ -64,6 +69,16 @@ const RESERVED = new Set([
   'or',
   'not',
   'repeat',
+  'is',
+])
+
+const ALLOWED_PARAM_FIELDS = new Set([
+  'default',
+  'label',
+  'description',
+  'min',
+  'max',
+  'enum',
 ])
 
 class Parser {
@@ -95,7 +110,7 @@ class Parser {
   }
 
   parseStatement(): Statement {
-    // Try assignment: $name = expr
+    // Try assignment: $name = expr  or  $name is { ... }
     if (this.input[this.pos] === '$') {
       const savedPos = this.pos
       try {
@@ -115,6 +130,8 @@ class Parser {
             const value = this.parseExpression()
             return assignment(name, value)
           }
+        } else if (this.matchKeyword('is')) {
+          return this.parseParameterDeclaration(name)
         } else {
           this.pos = savedPos
         }
@@ -124,6 +141,227 @@ class Parser {
     }
     const expr = this.parseExpression()
     return expressionStatement(expr)
+  }
+
+  parseParameterDeclaration(name: string): ParameterDeclaration {
+    this.skipWhitespaceAndComments()
+    this.expect('{')
+    this.skipWhitespaceAndComments()
+
+    const fields = new Map<string, unknown>()
+    while (this.pos < this.input.length && this.input[this.pos] !== '}') {
+      const fieldName = this.parseIdentifier()
+      if (!ALLOWED_PARAM_FIELDS.has(fieldName)) {
+        throw new Error(
+          `Unknown field '${fieldName}' in parameter $${name} (allowed: default, label, description, min, max, enum)`,
+        )
+      }
+      if (fields.has(fieldName)) {
+        throw new Error(`Duplicate field '${fieldName}' in parameter $${name}`)
+      }
+      this.skipSpaces()
+      this.expect(':')
+      this.skipWhitespaceAndComments()
+      const value = this.parseParameterFieldValue(name, fieldName)
+      fields.set(fieldName, value)
+      this.skipWhitespaceAndComments()
+      if (this.pos < this.input.length && this.input[this.pos] === ',') {
+        this.pos++
+        this.skipWhitespaceAndComments()
+      } else {
+        break
+      }
+    }
+    this.skipWhitespaceAndComments()
+    this.expect('}')
+
+    const spec = buildAndValidateParameterSpec(name, fields)
+    return parameterDeclaration(name, spec)
+  }
+
+  private parseParameterFieldValue(
+    paramName: string,
+    fieldName: string,
+  ): unknown {
+    switch (fieldName) {
+      case 'default':
+        return this.parseParameterDefaultValue(paramName)
+      case 'label':
+      case 'description':
+        return this.parseParameterStringLiteral(fieldName)
+      case 'min':
+      case 'max':
+        return this.parseParameterNumberLiteral(fieldName)
+      case 'enum':
+        return this.parseParameterEnumLiteral()
+      default:
+        throw new Error(
+          `Unknown field '${fieldName}' in parameter $${paramName}`,
+        )
+    }
+  }
+
+  private parseParameterDefaultValue(paramName: string): ParameterDefault {
+    this.skipSpaces()
+    if (this.pos >= this.input.length) {
+      throw new Error(
+        `Expected default value for parameter $${paramName} at position ${this.pos}`,
+      )
+    }
+    const ch = this.input[this.pos]
+    if (ch === '`') {
+      const expr = this.parseDiceExpr()
+      if (expr.type !== 'dice-expr') {
+        throw new Error(
+          `Expected dice expression for parameter $${paramName} default`,
+        )
+      }
+      return { kind: 'dice', expr: expr.expr, source: expr.source }
+    }
+    if (ch === '"') {
+      const v = this.parseStringExpr()
+      if (v.type !== 'string-literal') {
+        throw new Error(
+          `Expected string literal for parameter $${paramName} default`,
+        )
+      }
+      return { kind: 'value', value: v.value }
+    }
+    if (ch === '-') {
+      this.pos++
+      this.skipSpaces()
+      if (
+        this.pos >= this.input.length ||
+        this.input[this.pos] < '0' ||
+        this.input[this.pos] > '9'
+      ) {
+        throw new Error(
+          `Expected number after '-' for parameter $${paramName} default at position ${this.pos}`,
+        )
+      }
+      return { kind: 'value', value: -this.parseNumber() }
+    }
+    if (ch >= '0' && ch <= '9') {
+      return { kind: 'value', value: this.parseNumber() }
+    }
+    if (this.matchKeyword('true')) {
+      return { kind: 'value', value: true }
+    }
+    if (this.matchKeyword('false')) {
+      return { kind: 'value', value: false }
+    }
+    throw new Error(
+      `Default value for parameter $${paramName} must be a number, boolean, string, or backtick dice expression at position ${this.pos}`,
+    )
+  }
+
+  private parseParameterStringLiteral(fieldName: string): string {
+    this.skipSpaces()
+    if (this.pos >= this.input.length || this.input[this.pos] !== '"') {
+      throw new Error(
+        `Field '${fieldName}' must be a string literal at position ${this.pos}`,
+      )
+    }
+    const v = this.parseStringExpr()
+    if (v.type !== 'string-literal') {
+      throw new Error(
+        `Field '${fieldName}' must be a string literal at position ${this.pos}`,
+      )
+    }
+    return v.value
+  }
+
+  private parseParameterNumberLiteral(fieldName: string): number {
+    this.skipSpaces()
+    if (this.pos >= this.input.length) {
+      throw new Error(
+        `Field '${fieldName}' must be a number literal at position ${this.pos}`,
+      )
+    }
+    const ch = this.input[this.pos]
+    if (ch === '-') {
+      this.pos++
+      this.skipSpaces()
+      if (
+        this.pos >= this.input.length ||
+        this.input[this.pos] < '0' ||
+        this.input[this.pos] > '9'
+      ) {
+        throw new Error(
+          `Field '${fieldName}' must be a number literal at position ${this.pos}`,
+        )
+      }
+      return -this.parseNumber()
+    }
+    if (ch < '0' || ch > '9') {
+      throw new Error(
+        `Field '${fieldName}' must be a number literal at position ${this.pos}`,
+      )
+    }
+    return this.parseNumber()
+  }
+
+  private parseParameterEnumLiteral(): Value[] {
+    this.skipSpaces()
+    if (this.pos >= this.input.length || this.input[this.pos] !== '[') {
+      throw new Error(
+        `Field 'enum' must be an array literal at position ${this.pos}`,
+      )
+    }
+    this.pos++ // skip [
+    this.skipWhitespaceAndComments()
+    const elements: Value[] = []
+    if (this.pos < this.input.length && this.input[this.pos] === ']') {
+      this.pos++
+      return elements
+    }
+    elements.push(this.parseParameterLiteralValue())
+    this.skipWhitespaceAndComments()
+    while (this.pos < this.input.length && this.input[this.pos] === ',') {
+      this.pos++
+      this.skipWhitespaceAndComments()
+      // allow trailing comma
+      if (this.pos < this.input.length && this.input[this.pos] === ']') break
+      elements.push(this.parseParameterLiteralValue())
+      this.skipWhitespaceAndComments()
+    }
+    this.expect(']')
+    return elements
+  }
+
+  private parseParameterLiteralValue(): Value {
+    this.skipSpaces()
+    if (this.pos >= this.input.length) {
+      throw new Error(`Expected literal value at position ${this.pos}`)
+    }
+    const ch = this.input[this.pos]
+    if (ch === '"') {
+      const v = this.parseStringExpr()
+      if (v.type !== 'string-literal') {
+        throw new Error(`Expected string literal at position ${this.pos}`)
+      }
+      return v.value
+    }
+    if (ch === '-') {
+      this.pos++
+      this.skipSpaces()
+      if (
+        this.pos >= this.input.length ||
+        this.input[this.pos] < '0' ||
+        this.input[this.pos] > '9'
+      ) {
+        throw new Error(`Expected number after '-' at position ${this.pos}`)
+      }
+      return -this.parseNumber()
+    }
+    if (ch >= '0' && ch <= '9') {
+      return this.parseNumber()
+    }
+    if (this.matchKeyword('true')) return true
+    if (this.matchKeyword('false')) return false
+    throw new Error(
+      `Expected literal value (number, boolean, or string) at position ${this.pos}`,
+    )
   }
 
   parseExpression(): Expression {
@@ -697,4 +935,112 @@ function walkDiceReduceable(
     case 'dice-list-with-map':
       return reduceable
   }
+}
+
+function buildAndValidateParameterSpec(
+  paramName: string,
+  fields: Map<string, unknown>,
+): ParameterSpec {
+  const def = fields.get('default') as ParameterDefault | undefined
+  if (def === undefined) {
+    throw new Error(`Parameter $${paramName} missing required field 'default'`)
+  }
+
+  const spec: ParameterSpec = { default: def }
+
+  const label = fields.get('label')
+  if (label !== undefined) {
+    if (typeof label !== 'string') {
+      throw new Error(`Field 'label' must be a string literal`)
+    }
+    spec.label = label
+  }
+
+  const description = fields.get('description')
+  if (description !== undefined) {
+    if (typeof description !== 'string') {
+      throw new Error(`Field 'description' must be a string literal`)
+    }
+    spec.description = description
+  }
+
+  const min = fields.get('min')
+  const max = fields.get('max')
+  const enumVals = fields.get('enum')
+
+  const defaultIsNumber = def.kind === 'value' && typeof def.value === 'number'
+  const defaultIsDice = def.kind === 'dice'
+
+  if (min !== undefined) {
+    if (typeof min !== 'number') {
+      throw new Error(`Field 'min' must be a number literal`)
+    }
+    if (!defaultIsNumber && !defaultIsDice) {
+      throw new Error(`Field 'min' is only valid for number defaults`)
+    }
+    spec.min = min
+  }
+
+  if (max !== undefined) {
+    if (typeof max !== 'number') {
+      throw new Error(`Field 'max' must be a number literal`)
+    }
+    if (!defaultIsNumber && !defaultIsDice) {
+      throw new Error(`Field 'max' is only valid for number defaults`)
+    }
+    spec.max = max
+  }
+
+  if (enumVals !== undefined) {
+    if (!Array.isArray(enumVals)) {
+      throw new Error(`Field 'enum' must be an array literal`)
+    }
+    if (defaultIsNumber || defaultIsDice) {
+      throw new Error(`Field 'enum' is only valid for non-number defaults`)
+    }
+    // Verify all enum entries match the default's primitive kind.
+    if (def.kind === 'value') {
+      const defaultType = typeof def.value
+      for (const v of enumVals as unknown[]) {
+        if (typeof v !== defaultType) {
+          throw new Error(
+            `Enum entries must all be of type '${defaultType}' to match default`,
+          )
+        }
+      }
+      // Ensure default is in enum.
+      const found = (enumVals as unknown[]).some((v) => v === def.value)
+      if (!found) {
+        throw new Error(
+          `Default value ${formatValue(def.value)} is not a member of enum [${(enumVals as unknown[]).map(formatValue).join(', ')}]`,
+        )
+      }
+    }
+    spec.enum = enumVals as Value[]
+  }
+
+  if (spec.min !== undefined && spec.max !== undefined && spec.min > spec.max) {
+    throw new Error(`min (${spec.min}) must be <= max (${spec.max})`)
+  }
+
+  if (defaultIsNumber && def.kind === 'value') {
+    const v = def.value as number
+    if (spec.min !== undefined && v < spec.min) {
+      throw new Error(
+        `default (${v}) is out of range [${spec.min}, ${spec.max ?? ''}]`,
+      )
+    }
+    if (spec.max !== undefined && v > spec.max) {
+      throw new Error(
+        `default (${v}) is out of range [${spec.min ?? ''}, ${spec.max}]`,
+      )
+    }
+  }
+
+  return spec
+}
+
+function formatValue(v: unknown): string {
+  if (typeof v === 'string') return JSON.stringify(v)
+  return String(v)
 }
